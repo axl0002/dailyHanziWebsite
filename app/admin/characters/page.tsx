@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import CharacterEditModal, { Character } from "../components/CharacterEditModal";
+import CharacterEditModal, { Character, ExampleSentence } from "../components/CharacterEditModal";
+
+type CharacterRow = Character & {
+    example_sentences?: ExampleSentence[];
+};
 
 type SortField = keyof Character | null;
 type SortOrder = 'asc' | 'desc';
 
 export default function CharactersPage() {
-    const [characters, setCharacters] = useState<Character[]>([]);
+    const [characters, setCharacters] = useState<CharacterRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +49,7 @@ export default function CharactersPage() {
         try {
             let query = supabase
                 .from("characters")
-                .select("*", { count: 'exact' });
+                .select("*, example_sentences(id, chinese, traditional, pinyin, english)", { count: 'exact' });
 
             if (searchTerm) {
                 query = query.ilike('character', `%${searchTerm}%`);
@@ -97,13 +101,8 @@ export default function CharactersPage() {
         setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
     };
 
-    const handleEditClick = (char: Character) => {
-        // Ensure example_sentences is an array safely
-        const safeChar = {
-            ...char,
-            example_sentences: Array.isArray(char.example_sentences) ? char.example_sentences : []
-        };
-        setEditingCharacter(safeChar);
+    const handleEditClick = (char: CharacterRow) => {
+        setEditingCharacter(char);
         setShowModal(true);
     };
 
@@ -277,6 +276,9 @@ export default function CharactersPage() {
                                                 {char.example_sentences.slice(0, 2).map((sentence, idx) => (
                                                     <div key={idx} className="border-b last:border-0 pb-1 last:pb-0 border-gray-100">
                                                         <div className="font-semibold text-gray-800">{sentence.chinese}</div>
+                                                        {sentence.traditional && sentence.traditional !== sentence.chinese && (
+                                                            <div className="text-gray-700">{sentence.traditional}</div>
+                                                        )}
                                                         <div className="italic text-gray-600">{sentence.pinyin}</div>
                                                         <div className="text-gray-400">{sentence.english}</div>
                                                     </div>

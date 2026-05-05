@@ -94,12 +94,7 @@ export default function CharacterReportsPage() {
 
             if (error) throw error;
             if (data) {
-                // Ensure example_sentences is an array safely
-                const safeChar = {
-                    ...data,
-                    example_sentences: Array.isArray(data.example_sentences) ? data.example_sentences : []
-                };
-                setEditingCharacter(safeChar);
+                setEditingCharacter(data);
                 setShowModal(true);
             }
         } catch (err: unknown) {
