@@ -9,6 +9,8 @@ import ReadingHoursChart from "../components/ReadingHoursChart";
 import HSKLevelChart from "../components/HSKLevelChart";
 import ReasonChart from "../components/ReasonChart";
 import TimezoneChart from "../components/TimezoneChart";
+import ContinentChart from "../components/ContinentChart";
+import CountryChart from "../components/CountryChart";
 import CategoryChart from "../components/CategoryChart";
 import ProUserPercentageChart from "../components/ProUserPercentageChart";
 import ReferralByDayChart from "../components/ReferralByDayChart";
@@ -110,6 +112,8 @@ export default function AdminDashboard() {
                 <ReasonChart filter={filter} />
                 <ReferralChart filter={filter} />
                 <CategoryChart filter={filter} />
+                <ContinentChart filter={filter} />
+                <CountryChart filter={filter} />
                 <TimezoneChart filter={filter} />
                 <PlatformChart filter={filter} />
             </div>
