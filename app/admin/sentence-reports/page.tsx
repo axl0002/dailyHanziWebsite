@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import CharacterEditModal, { Character } from "../components/CharacterEditModal";
 
@@ -48,6 +48,11 @@ export default function SentenceReportsPage() {
     const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
     const [showModal, setShowModal] = useState(false);
 
+    // Audio playback
+    const [audioByChinese, setAudioByChinese] = useState<Record<string, string | null>>({});
+    const [playingReportId, setPlayingReportId] = useState<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
     const fetchReports = useCallback(async () => {
         setLoading(true);
         try {
@@ -65,7 +70,33 @@ export default function SentenceReportsPage() {
 
             if (error) throw error;
 
-            setReports(data || []);
+            const loadedReports = data || [];
+            setReports(loadedReports);
+
+            const uniqueChinese = Array.from(
+                new Set(
+                    loadedReports
+                        .map((r: SentenceReport) => r.sentence_chinese)
+                        .filter((c: string | null | undefined): c is string => !!c)
+                )
+            );
+
+            if (uniqueChinese.length > 0) {
+                const { data: sentenceData, error: sentenceError } = await supabase
+                    .from("example_sentences")
+                    .select("chinese, audio_url")
+                    .in("chinese", uniqueChinese);
+
+                if (sentenceError) throw sentenceError;
+
+                const map: Record<string, string | null> = {};
+                for (const s of sentenceData || []) {
+                    map[s.chinese] = s.audio_url ?? null;
+                }
+                setAudioByChinese(map);
+            } else {
+                setAudioByChinese({});
+            }
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : "Unknown error";
             setError(message);
@@ -73,6 +104,36 @@ export default function SentenceReportsPage() {
             setLoading(false);
         }
     }, [sortField, sortOrder]);
+
+    const handlePlayAudio = (reportId: string, audioUrl: string | null | undefined) => {
+        if (!audioUrl) return;
+
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current = null;
+        }
+
+        if (playingReportId === reportId) {
+            setPlayingReportId(null);
+            return;
+        }
+
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        setPlayingReportId(reportId);
+        audio.addEventListener("ended", () => setPlayingReportId(null));
+        audio.addEventListener("error", () => setPlayingReportId(null));
+        audio.play().catch(() => setPlayingReportId(null));
+    };
+
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         fetchReports();
@@ -274,7 +335,31 @@ export default function SentenceReportsPage() {
                                 {visibleColumns.sentence && (
                                     <td className="px-6 py-4 text-sm text-gray-500 max-w-[400px]">
                                         <div className="space-y-1">
-                                            <div className="font-semibold text-gray-800">{report.sentence_chinese}</div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold text-gray-800">{report.sentence_chinese}</span>
+                                                {(() => {
+                                                    const audioUrl = audioByChinese[report.sentence_chinese];
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handlePlayAudio(report.id, audioUrl)}
+                                                            disabled={!audioUrl}
+                                                            title={audioUrl ? "Play audio" : "No audio available"}
+                                                            className="shrink-0 px-1.5 py-1 rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                                                        >
+                                                            {playingReportId === report.id ? (
+                                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-700">
+                                                                    <path d="M5.5 3.5A1.5 1.5 0 017 5v10a1.5 1.5 0 01-3 0V5a1.5 1.5 0 011.5-1.5zM13 3.5A1.5 1.5 0 0114.5 5v10a1.5 1.5 0 01-3 0V5A1.5 1.5 0 0113 3.5z" />
+                                                                </svg>
+                                                            ) : (
+                                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-700">
+                                                                    <path d="M6.3 2.84A1 1 0 004.8 3.7v12.6a1 1 0 001.5.86l11-6.3a1 1 0 000-1.72l-11-6.3z" />
+                                                                </svg>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })()}
+                                            </div>
                                             <div className="italic text-gray-600">{report.sentence_pinyin}</div>
                                             <div className="text-gray-500">{report.sentence_english}</div>
                                         </div>
