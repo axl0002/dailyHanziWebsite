@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import CharacterEditModal, { Character } from "../components/CharacterEditModal";
 
@@ -40,6 +40,41 @@ export default function CharacterReportsPage() {
     // Editing
     const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
     const [showModal, setShowModal] = useState(false);
+
+    // Audio playback
+    const [playingReportId, setPlayingReportId] = useState<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    const handlePlayAudio = (reportId: string, characterId: string) => {
+        if (!characterId) return;
+
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current = null;
+        }
+
+        if (playingReportId === reportId) {
+            setPlayingReportId(null);
+            return;
+        }
+
+        const audioUrl = `https://pub-20c697fbe15d4d9aa3faae12deaea269.r2.dev/character/char_${characterId}.mp3`;
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        setPlayingReportId(reportId);
+        audio.addEventListener("ended", () => setPlayingReportId(null));
+        audio.addEventListener("error", () => setPlayingReportId(null));
+        audio.play().catch(() => setPlayingReportId(null));
+    };
+
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+            }
+        };
+    }, []);
 
     const fetchReports = useCallback(async () => {
         setLoading(true);
@@ -231,7 +266,26 @@ export default function CharacterReportsPage() {
                                 {visibleColumns.character && (
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="flex flex-col">
-                                            <span className="text-lg font-bold text-gray-900">{report.character_content}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-lg font-bold text-gray-900">{report.character_content}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handlePlayAudio(report.id, report.character_id)}
+                                                    disabled={!report.character_id}
+                                                    title="Play audio"
+                                                    className="shrink-0 px-1.5 py-1 rounded-md border bg-white hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                                                >
+                                                    {playingReportId === report.id ? (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-700">
+                                                            <path d="M5.5 3.5A1.5 1.5 0 017 5v10a1.5 1.5 0 01-3 0V5a1.5 1.5 0 011.5-1.5zM13 3.5A1.5 1.5 0 0114.5 5v10a1.5 1.5 0 01-3 0V5A1.5 1.5 0 0113 3.5z" />
+                                                        </svg>
+                                                    ) : (
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-700">
+                                                            <path d="M6.3 2.84A1 1 0 004.8 3.7v12.6a1 1 0 001.5.86l11-6.3a1 1 0 000-1.72l-11-6.3z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            </div>
                                             <span className="text-xs text-gray-400 font-mono">ID: {report.character_id}</span>
                                         </div>
                                     </td>
