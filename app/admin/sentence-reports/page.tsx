@@ -24,8 +24,14 @@ type SentenceReport = {
 type SortField = keyof SentenceReport;
 type SortOrder = 'asc' | 'desc';
 
+type ReportingUser = {
+    email: string | null;
+    timezone: string | null;
+};
+
 export default function SentenceReportsPage() {
     const [reports, setReports] = useState<SentenceReport[]>([]);
+    const [usersById, setUsersById] = useState<Record<string, ReportingUser>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +41,7 @@ export default function SentenceReportsPage() {
 
     // Column Visibility
     const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-        user_id: false,
+        user: false,
         character: true,
         category: true,
         sentence: true,
@@ -72,6 +78,31 @@ export default function SentenceReportsPage() {
 
             const loadedReports = data || [];
             setReports(loadedReports);
+
+            const userIds = Array.from(
+                new Set(
+                    loadedReports
+                        .map((r: SentenceReport) => r.user_id)
+                        .filter((id: string | null | undefined): id is string => !!id)
+                )
+            );
+
+            if (userIds.length > 0) {
+                const { data: profileData, error: profileError } = await supabase
+                    .from("profiles")
+                    .select("id, email, timezone")
+                    .in("id", userIds);
+
+                if (profileError) throw profileError;
+
+                const userMap: Record<string, ReportingUser> = {};
+                for (const p of profileData || []) {
+                    userMap[p.id] = { email: p.email ?? null, timezone: p.timezone ?? null };
+                }
+                setUsersById(userMap);
+            } else {
+                setUsersById({});
+            }
 
             const uniqueChinese = Array.from(
                 new Set(
@@ -262,9 +293,9 @@ export default function SentenceReportsPage() {
                 <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                         <tr>
-                            {visibleColumns.user_id && (
-                                <th onClick={() => handleSort('user_id')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100">
-                                    User ID {sortField === 'user_id' && (sortOrder === 'asc' ? '↑' : '↓')}
+                            {visibleColumns.user && (
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    User
                                 </th>
                             )}
                             {visibleColumns.character && (
@@ -302,9 +333,17 @@ export default function SentenceReportsPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                         {reports.map((report) => (
                             <tr key={report.id}>
-                                {visibleColumns.user_id && (
-                                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 font-mono">
-                                        {report.user_id || 'N/A'}
+                                {visibleColumns.user && (
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {report.user_id ? (
+                                            <div className="flex flex-col">
+                                                <span className="text-gray-800">{usersById[report.user_id]?.email || 'Unknown email'}</span>
+                                                <span className="text-xs text-gray-500">{usersById[report.user_id]?.timezone || 'No timezone'}</span>
+                                                <span className="text-xs text-gray-400 font-mono mt-1">ID: {report.user_id}</span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-gray-400">N/A</span>
+                                        )}
                                     </td>
                                 )}
                                 {visibleColumns.character && (

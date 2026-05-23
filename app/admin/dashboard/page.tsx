@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 
 import ReferralChart from "../components/ReferralChart";
 import UserGrowthChart from "../components/UserGrowthChart";
+import HourlyGrowthChart from "../components/HourlyGrowthChart";
 import ReadingHoursChart from "../components/ReadingHoursChart";
 import HSKLevelChart from "../components/HSKLevelChart";
 import ReasonChart from "../components/ReasonChart";
@@ -106,6 +107,9 @@ export default function AdminDashboard() {
                 </div>
                 <div className="col-span-1 md:col-span-2">
                     <ProUserPercentageChart dateLabels={labels} onAddLabel={addLabel} onDeleteLabel={deleteLabel} />
+                </div>
+                <div className="col-span-1 md:col-span-2">
+                    <HourlyGrowthChart filter={filter} />
                 </div>
                 <ReadingHoursChart filter={filter} />
                 <HSKLevelChart filter={filter} />
