@@ -193,6 +193,12 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
     const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
     const showSevenDayLine = data.some(d => d.date === sevenDaysAgoStr);
 
+    // 3 days ago reference line
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const threeDaysAgoStr = threeDaysAgo.toISOString().split('T')[0];
+    const showThreeDayLine = data.some(d => d.date === threeDaysAgoStr);
+
     // Labels visible in current date range, staggered by row so neighbors don't overlap
     const rawLabels = data
         .filter(d => dateLabels[d.date]?.length > 0)
@@ -373,6 +379,14 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
                                 stroke="#9CA3AF"
                                 strokeDasharray="4 4"
                                 label={{ value: '7d ago', position: 'top', fill: '#9CA3AF', fontSize: 11 }}
+                            />
+                        )}
+                        {showThreeDayLine && (
+                            <ReferenceLine
+                                x={threeDaysAgoStr}
+                                stroke="#9CA3AF"
+                                strokeDasharray="4 4"
+                                label={{ value: '3d ago', position: 'top', fill: '#9CA3AF', fontSize: 11 }}
                             />
                         )}
                         {visibleLabels.map(({ date, labels: lbls, row }) => (
