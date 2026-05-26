@@ -56,17 +56,26 @@ export async function middleware(request: NextRequest) {
             return NextResponse.redirect(url)
         }
 
-        // Server-side admin role check
-        const { data: role } = await supabase
+        // Server-side role check: admins and moderators may enter the admin area
+        const { data: roleRows } = await supabase
             .from('user_roles')
             .select('role')
             .eq('user_id', user.id)
-            .eq('role', 'admin')
-            .single()
+            .in('role', ['admin', 'moderator'])
 
-        if (!role) {
+        const roles = roleRows?.map((r) => r.role) ?? []
+
+        if (roles.length === 0) {
             const url = request.nextUrl.clone()
             url.pathname = '/'
+            return NextResponse.redirect(url)
+        }
+
+        // Moderators must not see the revenue dashboard. This is the real gate;
+        // the nav is hidden in the layout for UX, but enforcement lives here.
+        if (!roles.includes('admin') && request.nextUrl.pathname.startsWith('/admin/dashboard')) {
+            const url = request.nextUrl.clone()
+            url.pathname = '/admin/sentence-reports'
             return NextResponse.redirect(url)
         }
     }

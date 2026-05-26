@@ -28,7 +28,21 @@ export default function AdminLogin() {
 
             // Force a router refresh to update server components/middleware state
             router.refresh();
-            router.push("/admin/dashboard");
+
+            // Send admins to the dashboard; moderators don't have access, so
+            // route them to the reports they work on instead.
+            const { data: { user } } = await supabase.auth.getUser();
+            let destination = "/admin/sentence-reports";
+            if (user) {
+                const { data: adminRole } = await supabase
+                    .from("user_roles")
+                    .select("role")
+                    .eq("user_id", user.id)
+                    .eq("role", "admin")
+                    .maybeSingle();
+                if (adminRole) destination = "/admin/dashboard";
+            }
+            router.push(destination);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : "Unknown error";
             setError(message);
