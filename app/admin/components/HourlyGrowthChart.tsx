@@ -146,6 +146,13 @@ export default function HourlyGrowthChart({ filter }: Props) {
         </div>
     );
 
+    // Map unique hour keys → friendly axis labels. The axis must key off `hour`
+    // (unique) rather than `label` (clock hours repeat across the 48h window), or
+    // scaleBand collapses duplicate labels onto the same x position and the bars
+    // no longer line up with their ticks/tooltips.
+    const labelByHour: Record<string, string> = {};
+    data.forEach((d) => { labelByHour[d.hour] = d.label; });
+
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 col-span-1 md:col-span-2">
             <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
@@ -165,7 +172,8 @@ export default function HourlyGrowthChart({ filter }: Props) {
                     >
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                         <XAxis
-                            dataKey="label"
+                            dataKey="hour"
+                            tickFormatter={(v: string) => labelByHour[v] ?? ''}
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}

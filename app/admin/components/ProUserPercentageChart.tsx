@@ -78,9 +78,17 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
         const fetchData = async () => {
             setLoading(true);
 
-            const { endDate } = getDateWindow();
+            const { startDate, endDate } = getDateWindow();
 
-            // Fetch ALL non-beta profiles with pagination
+            // Only fetch profiles within the visible window (padded ±1 day to cover the
+            // local/UTC date-bucketing boundary). Keeps each query bounded to the window
+            // instead of scanning the whole table as the userbase grows.
+            const queryStart = new Date(startDate);
+            queryStart.setDate(queryStart.getDate() - 1);
+            const queryEnd = new Date(endDate);
+            queryEnd.setDate(queryEnd.getDate() + 1);
+
+            // Fetch profiles within the window with pagination
             let allProfiles: { created_at: string; is_pro: boolean | null }[] = [];
             let page = 0;
             const pageSize = 1000;
@@ -94,6 +102,9 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                     .from('profiles')
                     .select('created_at, is_pro')
                     .eq('is_beta', false)
+                    .gte('created_at', queryStart.toISOString())
+                    .lte('created_at', queryEnd.toISOString())
+                    .order('created_at', { ascending: true })
                     .range(from, to);
 
                 const { data: batch, error } = await query;

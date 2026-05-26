@@ -99,7 +99,15 @@ export default function PlatformByDayChart({ filter, dateLabels, onAddLabel, onD
         const fetchData = async () => {
             setLoading(true);
 
-            const { endDate } = getDateWindow();
+            const { startDate, endDate } = getDateWindow();
+
+            // Only fetch profiles within the visible window (padded ±1 day to cover the
+            // local/UTC date-bucketing boundary). Keeps each query bounded to the window
+            // instead of scanning the whole table as the userbase grows.
+            const queryStart = new Date(startDate);
+            queryStart.setDate(queryStart.getDate() - 1);
+            const queryEnd = new Date(endDate);
+            queryEnd.setDate(queryEnd.getDate() + 1);
 
             let allProfiles: { created_at: string; is_pro: boolean | null; platform: string | null }[] = [];
             let page = 0;
@@ -114,6 +122,9 @@ export default function PlatformByDayChart({ filter, dateLabels, onAddLabel, onD
                     .from('profiles')
                     .select('created_at, is_pro, platform')
                     .eq('is_beta', false)
+                    .gte('created_at', queryStart.toISOString())
+                    .lte('created_at', queryEnd.toISOString())
+                    .order('created_at', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

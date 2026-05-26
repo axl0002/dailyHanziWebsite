@@ -146,12 +146,21 @@ export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onD
         return startDate > earliest;
     }, [earliestDate, getDateWindow]);
 
-    // Fetch profiles once per filter change. Day-window / groupMode / Top-N changes
-    // are pure client-side re-aggregations of this cached profile list.
+    // Fetch profiles within the visible window. groupMode / Top-N changes are pure
+    // client-side re-aggregations of this list; changing the day-window / page refetches
+    // so we only ever pull rows in range rather than scanning the whole table.
     useEffect(() => {
         let cancelled = false;
         const fetchProfiles = async () => {
             setLoading(true);
+
+            const { startDate, endDate } = getDateWindow();
+
+            // Padded ±1 day to cover the local/UTC date-bucketing boundary.
+            const queryStart = new Date(startDate);
+            queryStart.setDate(queryStart.getDate() - 1);
+            const queryEnd = new Date(endDate);
+            queryEnd.setDate(queryEnd.getDate() + 1);
 
             let allProfiles: Profile[] = [];
             let page = 0;
@@ -166,6 +175,9 @@ export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onD
                     .from('profiles')
                     .select('created_at, is_pro, timezone')
                     .eq('is_beta', false)
+                    .gte('created_at', queryStart.toISOString())
+                    .lte('created_at', queryEnd.toISOString())
+                    .order('created_at', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {
@@ -205,7 +217,7 @@ export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onD
 
         fetchProfiles();
         return () => { cancelled = true; };
-    }, [filter]);
+    }, [filter, getDateWindow]);
 
     // Derive chart data from cached profiles. Recomputes instantly on toggle/day change.
     const { data, groups, debugInfo, unmappedZones, dailyBreakdown } = useMemo(() => {
