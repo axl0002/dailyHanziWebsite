@@ -113,16 +113,29 @@ export default function SentenceReportsPage() {
             );
 
             if (uniqueChinese.length > 0) {
-                const { data: sentenceData, error: sentenceError } = await supabase
-                    .from("example_sentences")
-                    .select("chinese, audio_url")
-                    .in("chinese", uniqueChinese);
+                // A report stores whichever script the user was viewing, so the
+                // reported text may be the simplified (`chinese`) OR the traditional
+                // (`traditional`) form of an example sentence. Match against both
+                // columns and key the audio map by both forms, so the lookup by
+                // report.sentence_chinese resolves regardless of which the reporter saw.
+                const [bySimplified, byTraditional] = await Promise.all([
+                    supabase
+                        .from("example_sentences")
+                        .select("chinese, traditional, audio_url")
+                        .in("chinese", uniqueChinese),
+                    supabase
+                        .from("example_sentences")
+                        .select("chinese, traditional, audio_url")
+                        .in("traditional", uniqueChinese),
+                ]);
 
-                if (sentenceError) throw sentenceError;
+                if (bySimplified.error) throw bySimplified.error;
+                if (byTraditional.error) throw byTraditional.error;
 
                 const map: Record<string, string | null> = {};
-                for (const s of sentenceData || []) {
-                    map[s.chinese] = s.audio_url ?? null;
+                for (const s of [...(bySimplified.data || []), ...(byTraditional.data || [])]) {
+                    if (s.chinese) map[s.chinese] = s.audio_url ?? null;
+                    if (s.traditional) map[s.traditional] = s.audio_url ?? null;
                 }
                 setAudioByChinese(map);
             } else {
