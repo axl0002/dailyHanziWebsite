@@ -10,6 +10,7 @@ type SuperUser = {
     streak_days: number;
     is_pro: boolean;
     platform: string | null;
+    timezone: string | null;
     created_at: string;
 };
 
@@ -38,7 +39,7 @@ export default function SuperUsersPage() {
 
             const { data, error: queryError } = await supabase
                 .from("profiles")
-                .select("id, full_name, email, streak_days, is_pro, platform, created_at")
+                .select("id, full_name, email, streak_days, is_pro, platform, timezone, created_at")
                 .eq('is_beta', false)
                 .order(sortField, { ascending: sortOrder === 'asc' })
                 .range(from, to);
@@ -132,6 +133,9 @@ export default function SuperUsersPage() {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 Platform
                             </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Timezone
+                            </th>
                             <th
                                 onClick={() => handleSort('created_at')}
                                 className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
@@ -177,13 +181,16 @@ export default function SuperUsersPage() {
                                     {user.platform || "—"}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    {user.timezone || "—"}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                     {new Date(user.created_at).toLocaleDateString()}
                                 </td>
                             </tr>
                         ))}
                         {users.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                <td colSpan={8} className="px-6 py-4 text-center text-sm text-gray-500">
                                     No users found.
                                 </td>
                             </tr>
