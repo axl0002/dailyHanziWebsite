@@ -8,9 +8,12 @@ type ChartData = {
     bucketKey: string;
     label: string;
     fullLabel: string;
+    // Percentages (what % of that cohort's total cancellations fell in this bucket).
     trial3d: number;
     trial7d: number;
-    total: number;
+    // Raw counts for tooltips.
+    trial3dCount: number;
+    trial7dCount: number;
 };
 
 type SupabaseRow = {
@@ -137,7 +140,8 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                     fullLabel: `Day ${Math.floor(dayStart)} — ${startH}h to ${endH}h after trial start`,
                     trial3d: 0,
                     trial7d: 0,
-                    total: 0,
+                    trial3dCount: 0,
+                    trial7dCount: 0,
                 };
             });
 
@@ -147,14 +151,17 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                 const ets = r.raw?.event_timestamp_ms;
                 const pts = r.raw?.purchased_at_ms;
                 if (!len || !ets || !pts) continue;
-                // Filter to cohort: trial start must fall in the cohort window.
                 if (pts < cohortStartMs || pts >= cohortEndMs) continue;
                 const elapsedHours = (ets - pts) / 3600000;
                 if (elapsedHours < 0 || elapsedHours >= MAX_DAYS * 24) continue;
                 const idx = Math.min(NUM_BUCKETS - 1, Math.floor(elapsedHours / BUCKET_HOURS));
-                if (len === 3) { buckets[idx].trial3d++; c3++; }
-                else { buckets[idx].trial7d++; c7++; }
-                buckets[idx].total++;
+                if (len === 3) { buckets[idx].trial3dCount++; c3++; }
+                else { buckets[idx].trial7dCount++; c7++; }
+            }
+            // Convert raw counts to percentages of each cohort's total cancellations.
+            for (const b of buckets) {
+                b.trial3d = c3 > 0 ? (b.trial3dCount / c3) * 100 : 0;
+                b.trial7d = c7 > 0 ? (b.trial7dCount / c7) * 100 : 0;
             }
 
             setData(buckets);
@@ -226,7 +233,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                             tick={{ fontSize: 12, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            allowDecimals={false}
+                            tickFormatter={(v: number) => `${v}%`}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
@@ -239,9 +246,8 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                                             {payload.map((entry, index) => {
                                                 const is7d = entry.name === '7-day trial';
                                                 const colorClass = is7d ? 'text-indigo-600' : 'text-purple-600';
-                                                const value = entry.value as number;
-                                                const cohortTotal = is7d ? cancels7d : cancels3d;
-                                                const percentage = cohortTotal > 0 ? ((value / cohortTotal) * 100).toFixed(1) : '0.0';
+                                                const pct = entry.value as number;
+                                                const count = is7d ? row.trial7dCount : row.trial3dCount;
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">
                                                         <div className="flex items-center gap-2">
@@ -254,7 +260,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                                                             </span>
                                                         </div>
                                                         <span className={`text-sm font-bold ${colorClass}`}>
-                                                            {value} ({percentage}%)
+                                                            {pct.toFixed(1)}% ({count})
                                                         </span>
                                                     </div>
                                                 );
@@ -266,8 +272,8 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                             }}
                         />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        <Bar dataKey="trial7d" name="7-day trial" stackId="cancels" fill="#6366F1" radius={[0, 0, 4, 4]} />
-                        <Bar dataKey="trial3d" name="3-day trial" stackId="cancels" fill="#C4B5FD" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="trial7d" name="7-day trial" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="trial3d" name="3-day trial" fill="#C4B5FD" radius={[4, 4, 0, 0]} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>
