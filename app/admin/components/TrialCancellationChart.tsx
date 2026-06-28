@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { supabase } from '@/lib/supabase';
 
-type ChartRow = {
-    hours: number;      // start of 6-hour bucket
-    bucket: string;     // tooltip label
+type ChartData = {
+    bucketKey: string;   // unique key, used as XAxis dataKey
+    label: string;       // short axis label (only shown for day boundaries)
+    fullLabel: string;   // tooltip header
     trial3d: number;
     trial7d: number;
+    total: number;
 };
 
 type SupabaseRow = {
@@ -20,6 +22,10 @@ type SupabaseRow = {
     } | null;
 };
 
+type Props = {
+    windowDays?: number;
+};
+
 const BUCKET_HOURS = 6;
 const MAX_DAYS = 7;
 const NUM_BUCKETS = (MAX_DAYS * 24) / BUCKET_HOURS; // 28
@@ -28,7 +34,7 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
     if (pid.endsWith('_3d')) return 3;
     if (pid.endsWith('_7d')) return 7;
-    // Some legacy product IDs don't carry the suffix; infer from actual trial duration.
+    // Fall back to actual trial duration for legacy product IDs without the suffix.
     const ets = row.raw?.expiration_at_ms;
     const pts = row.raw?.purchased_at_ms;
     if (ets && pts) {
@@ -39,14 +45,12 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     return null;
 }
 
-type Props = {
-    windowDays?: number;
-};
-
 export default function TrialCancellationChart({ windowDays = 30 }: Props) {
-    const [data, setData] = useState<ChartRow[]>([]);
+    const [data, setData] = useState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [totals, setTotals] = useState({ trial3d: 0, trial7d: 0, skipped: 0 });
+    const [totalInPeriod, setTotalInPeriod] = useState(0);
+    const [total3d, setTotal3d] = useState(0);
+    const [total7d, setTotal7d] = useState(0);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -84,27 +88,40 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                 if (rows.length > 50000) hasMore = false;
             }
 
-            const buckets: ChartRow[] = Array.from({ length: NUM_BUCKETS }, (_, i) => ({
-                hours: i * BUCKET_HOURS,
-                bucket: `${i * BUCKET_HOURS}h-${(i + 1) * BUCKET_HOURS}h`,
-                trial3d: 0,
-                trial7d: 0,
-            }));
+            const buckets: ChartData[] = Array.from({ length: NUM_BUCKETS }, (_, i) => {
+                const startH = i * BUCKET_HOURS;
+                const endH = startH + BUCKET_HOURS;
+                const dayStart = startH / 24;
+                return {
+                    bucketKey: `h${startH}`,
+                    label: startH % 24 === 0 ? `D${dayStart}` : '',
+                    fullLabel: `Day ${Math.floor(dayStart)} — ${startH}h to ${endH}h after trial start`,
+                    trial3d: 0,
+                    trial7d: 0,
+                    total: 0,
+                };
+            });
 
-            let t3 = 0, t7 = 0, skipped = 0;
+            let inPeriodCount = 0;
+            let t3 = 0, t7 = 0;
             for (const r of rows) {
                 const len = trialLengthDays(r);
                 const ets = r.raw?.event_timestamp_ms;
                 const pts = r.raw?.purchased_at_ms;
-                if (!len || !ets || !pts) { skipped++; continue; }
+                if (!len || !ets || !pts) continue;
                 const elapsedHours = (ets - pts) / 3600000;
-                if (elapsedHours < 0 || elapsedHours >= MAX_DAYS * 24) { skipped++; continue; }
+                if (elapsedHours < 0 || elapsedHours >= MAX_DAYS * 24) continue;
                 const idx = Math.min(NUM_BUCKETS - 1, Math.floor(elapsedHours / BUCKET_HOURS));
                 if (len === 3) { buckets[idx].trial3d++; t3++; }
                 else { buckets[idx].trial7d++; t7++; }
+                buckets[idx].total++;
+                inPeriodCount++;
             }
+
             setData(buckets);
-            setTotals({ trial3d: t3, trial7d: t7, skipped });
+            setTotalInPeriod(inPeriodCount);
+            setTotal3d(t3);
+            setTotal7d(t7);
             setLoading(false);
         };
         fetchData();
@@ -112,49 +129,91 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col h-[460px] col-span-1 md:col-span-2">
-            <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-6">Trial Cancellation Timing</h3>
             <div className="flex-1 flex items-center justify-center">
                 <span className="text-gray-400">Loading chart data...</span>
             </div>
         </div>
     );
 
+    const labelByKey: Record<string, string> = {};
+    data.forEach((d) => { labelByKey[d.bucketKey] = d.label; });
+
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 col-span-1 md:col-span-2">
-            <div className="flex flex-wrap justify-between items-start mb-6 gap-3">
-                <div>
+            <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
+                <div className="flex items-center gap-3">
                     <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                        When users turn off auto-renew during their trial — 6h buckets, last {windowDays}d
-                    </p>
+                    <span className="text-sm text-gray-500">Last {windowDays} days</span>
                 </div>
-                <div className="text-right text-xs text-gray-500">
-                    <div><span className="font-medium text-gray-700">3-day trials canceled:</span> {totals.trial3d}</div>
-                    <div><span className="font-medium text-gray-700">7-day trials canceled:</span> {totals.trial7d}</div>
-                    {totals.skipped > 0 && <div className="text-gray-400">({totals.skipped} skipped — unknown trial length)</div>}
-                </div>
+                <span className="text-xs text-gray-400">
+                    {totalInPeriod} cancellations in period
+                </span>
             </div>
-            <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis
-                        dataKey="hours"
-                        tick={{ fontSize: 11, fill: '#64748b' }}
-                        tickFormatter={(h: number) => h % 24 === 0 ? `D${h / 24}` : ''}
-                        interval={0}
-                    />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} />
-                    <Tooltip
-                        labelFormatter={(label) => {
-                            const h = Number(label);
-                            return `${h}h–${h + BUCKET_HOURS}h after trial start`;
-                        }}
-                    />
-                    <Legend />
-                    <Bar dataKey="trial3d" name="3-day trial" stackId="trial" fill="#c084fc" />
-                    <Bar dataKey="trial7d" name="7-day trial" stackId="trial" fill="#6366f1" />
-                </BarChart>
-            </ResponsiveContainer>
+            <div className="h-[350px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                        data={data}
+                        margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
+                    >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis
+                            dataKey="bucketKey"
+                            tickFormatter={(v: string) => labelByKey[v] ?? ''}
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
+                            tickLine={false}
+                            axisLine={false}
+                            interval={3}
+                        />
+                        <YAxis
+                            tick={{ fontSize: 12, fill: '#6B7280' }}
+                            tickLine={false}
+                            axisLine={false}
+                            allowDecimals={false}
+                        />
+                        <Tooltip
+                            cursor={{ fill: '#F9FAFB' }}
+                            content={({ active, payload }) => {
+                                if (active && payload && payload.length) {
+                                    const row = payload[0].payload as ChartData;
+                                    return (
+                                        <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[200px]">
+                                            <p className="font-semibold text-gray-900 mb-2">{row.fullLabel}</p>
+                                            {payload.map((entry, index) => {
+                                                const is7d = entry.name === '7-day trial';
+                                                const colorClass = is7d ? 'text-indigo-600' : 'text-purple-600';
+                                                const value = entry.value as number;
+                                                const cohortTotal = is7d ? total7d : total3d;
+                                                const percentage = cohortTotal > 0 ? ((value / cohortTotal) * 100).toFixed(1) : '0.0';
+                                                return (
+                                                    <div key={index} className="flex items-center justify-between gap-4 mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className="w-2 h-2 rounded-full"
+                                                                style={{ backgroundColor: entry.color }}
+                                                            />
+                                                            <span className={`text-sm font-medium ${colorClass}`}>
+                                                                {entry.name}
+                                                            </span>
+                                                        </div>
+                                                        <span className={`text-sm font-bold ${colorClass}`}>
+                                                            {value} ({percentage}%)
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            }}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        <Bar dataKey="trial7d" name="7-day trial" stackId="cancels" fill="#6366F1" radius={[0, 0, 4, 4]} />
+                        <Bar dataKey="trial3d" name="3-day trial" stackId="cancels" fill="#C4B5FD" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
         </div>
     );
 }
