@@ -51,41 +51,57 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
     const [totalInPeriod, setTotalInPeriod] = useState(0);
     const [total3d, setTotal3d] = useState(0);
     const [total7d, setTotal7d] = useState(0);
+    const [starts3d, setStarts3d] = useState(0);
+    const [starts7d, setStarts7d] = useState(0);
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             const since = new Date(Date.now() - windowDays * 86400000).toISOString();
 
-            const rows: SupabaseRow[] = [];
-            let page = 0;
-            const pageSize = 1000;
-            let hasMore = true;
-            while (hasMore) {
-                const from = page * pageSize;
-                const to = from + pageSize - 1;
-                const { data: batch, error } = await supabase
-                    .from('subscription_events')
-                    .select('product_id, raw')
-                    .eq('event_type', 'CANCELLATION')
-                    .eq('period_type', 'TRIAL')
-                    .eq('cancel_reason', 'UNSUBSCRIBE')
-                    .gte('event_timestamp', since)
-                    .order('event_timestamp', { ascending: false })
-                    .range(from, to);
-                if (error) {
-                    console.error('TrialCancellationChart fetch error:', error);
-                    setLoading(false);
-                    return;
+            // Paginated fetch helper.
+            const fetchAll = async (eventType: string, extraEq?: { cancel_reason?: string }) => {
+                const out: SupabaseRow[] = [];
+                let page = 0;
+                const pageSize = 1000;
+                let hasMore = true;
+                while (hasMore) {
+                    const from = page * pageSize;
+                    const to = from + pageSize - 1;
+                    let q = supabase
+                        .from('subscription_events')
+                        .select('product_id, raw')
+                        .eq('event_type', eventType)
+                        .eq('period_type', 'TRIAL')
+                        .gte('event_timestamp', since)
+                        .order('event_timestamp', { ascending: false })
+                        .range(from, to);
+                    if (extraEq?.cancel_reason) q = q.eq('cancel_reason', extraEq.cancel_reason);
+                    const { data: batch, error } = await q;
+                    if (error) { console.error('TrialCancellationChart fetch error:', error); return null; }
+                    if (batch && batch.length > 0) {
+                        out.push(...(batch as SupabaseRow[]));
+                        if (batch.length < pageSize) hasMore = false;
+                    } else {
+                        hasMore = false;
+                    }
+                    page++;
+                    if (out.length > 50000) hasMore = false;
                 }
-                if (batch && batch.length > 0) {
-                    rows.push(...(batch as SupabaseRow[]));
-                    if (batch.length < pageSize) hasMore = false;
-                } else {
-                    hasMore = false;
-                }
-                page++;
-                if (rows.length > 50000) hasMore = false;
+                return out;
+            };
+
+            const [rows, startRows] = await Promise.all([
+                fetchAll('CANCELLATION', { cancel_reason: 'UNSUBSCRIBE' }),
+                fetchAll('INITIAL_PURCHASE'),
+            ]);
+            if (!rows || !startRows) { setLoading(false); return; }
+
+            let s3 = 0, s7 = 0;
+            for (const r of startRows) {
+                const len = trialLengthDays(r);
+                if (len === 3) s3++;
+                else if (len === 7) s7++;
             }
 
             const buckets: ChartData[] = Array.from({ length: NUM_BUCKETS }, (_, i) => {
@@ -122,6 +138,8 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
             setTotalInPeriod(inPeriodCount);
             setTotal3d(t3);
             setTotal7d(t7);
+            setStarts3d(s3);
+            setStarts7d(s7);
             setLoading(false);
         };
         fetchData();
@@ -146,9 +164,21 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                     <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
                     <span className="text-sm text-gray-500">Last {windowDays} days</span>
                 </div>
-                <span className="text-xs text-gray-400">
-                    {totalInPeriod} cancellations in period
-                </span>
+                <div className="text-right text-xs text-gray-400 leading-snug">
+                    <div>{totalInPeriod} cancellations in period</div>
+                    <div>
+                        <span className="text-indigo-600 font-medium">
+                            {starts7d > 0 ? `${((total7d / starts7d) * 100).toFixed(1)}%` : '—'}
+                        </span>
+                        {' '}of 7-day trials
+                    </div>
+                    <div>
+                        <span className="text-purple-500 font-medium">
+                            {starts3d > 0 ? `${((total3d / starts3d) * 100).toFixed(1)}%` : '—'}
+                        </span>
+                        {' '}of 3-day trials
+                    </div>
+                </div>
             </div>
             <div className="h-[350px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
