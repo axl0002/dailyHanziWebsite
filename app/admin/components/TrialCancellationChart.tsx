@@ -227,35 +227,35 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                         <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
                         <span className="text-sm text-gray-500">{cohortLabel}</span>
                     </div>
-                    <div className="mt-3 bg-white p-0.5 rounded-md border border-gray-200 inline-flex">
-                        <button
-                            onClick={() => setMode('full')}
-                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'full' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            Full 7 days (6h)
-                        </button>
-                        <button
-                            onClick={() => setMode('detail6h')}
-                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail6h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            First 6 hours (15m)
-                        </button>
+                    <div className="text-xs text-gray-400 leading-snug mt-2">
+                        <div>{totalCancels} cancellations in cohort</div>
+                        <div>
+                            <span className="text-indigo-600 font-medium">
+                                {starts7d > 0 ? `${((cancels7d / starts7d) * 100).toFixed(1)}%` : '—'}
+                            </span>
+                            {' '}of {starts7d} 7-day trials
+                        </div>
+                        <div>
+                            <span className="text-purple-500 font-medium">
+                                {starts3d > 0 ? `${((cancels3d / starts3d) * 100).toFixed(1)}%` : '—'}
+                            </span>
+                            {' '}of {starts3d} 3-day trials
+                        </div>
                     </div>
                 </div>
-                <div className="text-right text-xs text-gray-400 leading-snug">
-                    <div>{totalCancels} cancellations in cohort</div>
-                    <div>
-                        <span className="text-indigo-600 font-medium">
-                            {starts7d > 0 ? `${((cancels7d / starts7d) * 100).toFixed(1)}%` : '—'}
-                        </span>
-                        {' '}of {starts7d} 7-day trials
-                    </div>
-                    <div>
-                        <span className="text-purple-500 font-medium">
-                            {starts3d > 0 ? `${((cancels3d / starts3d) * 100).toFixed(1)}%` : '—'}
-                        </span>
-                        {' '}of {starts3d} 3-day trials
-                    </div>
+                <div className="bg-white p-0.5 rounded-md border border-gray-200 flex">
+                    <button
+                        onClick={() => setMode('full')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'full' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        Full 7 days (6h)
+                    </button>
+                    <button
+                        onClick={() => setMode('detail6h')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail6h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        First 6 hours (15m)
+                    </button>
                 </div>
             </div>
             <div className="h-[350px] w-full">
