@@ -29,7 +29,7 @@ type Props = {
     bufferDays?: number;
 };
 
-type Mode = 'full' | 'detail6h';
+type Mode = 'full' | 'detail6h' | 'detail1h';
 
 function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
@@ -73,13 +73,27 @@ const FULL_CONFIG: BucketConfig = {
     shortLabel: (startMin) => startMin % (24 * 60) === 0 ? `D${startMin / 60 / 24}` : '',
 };
 
-const DETAIL_CONFIG: BucketConfig = {
+const DETAIL_6H_CONFIG: BucketConfig = {
     minutes: 15,
     maxMinutes: 6 * 60,
     numBuckets: 24,
     axisInterval: 3,           // every 4th tick = every hour
     shortLabel: (startMin) => startMin % 60 === 0 ? `${startMin / 60}h` : '',
 };
+
+const DETAIL_1H_CONFIG: BucketConfig = {
+    minutes: 5,
+    maxMinutes: 60,
+    numBuckets: 12,
+    axisInterval: 2,           // every 3rd tick = every 15 min
+    shortLabel: (startMin) => startMin % 15 === 0 ? `${startMin}m` : '',
+};
+
+function configFor(mode: Mode): BucketConfig {
+    if (mode === 'detail1h') return DETAIL_1H_CONFIG;
+    if (mode === 'detail6h') return DETAIL_6H_CONFIG;
+    return FULL_CONFIG;
+}
 
 export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8 }: Props) {
     const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
@@ -164,7 +178,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
     }, [cohortDays, bufferDays]);
 
     const { data, cancels3d, cancels7d } = useMemo(() => {
-        const cfg = mode === 'detail6h' ? DETAIL_CONFIG : FULL_CONFIG;
+        const cfg = configFor(mode);
 
         const buckets: ChartData[] = Array.from({ length: cfg.numBuckets }, (_, i) => {
             const startMin = i * cfg.minutes;
@@ -256,6 +270,12 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                     >
                         First 6 hours (15m)
                     </button>
+                    <button
+                        onClick={() => setMode('detail1h')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail1h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        First 1 hour (5m)
+                    </button>
                 </div>
             </div>
             <div className="h-[350px] w-full">
@@ -271,7 +291,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            interval={(mode === 'detail6h' ? DETAIL_CONFIG : FULL_CONFIG).axisInterval}
+                            interval={(configFor(mode)).axisInterval}
                         />
                         <YAxis
                             tick={{ fontSize: 12, fill: '#6B7280' }}
