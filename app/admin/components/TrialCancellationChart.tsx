@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { supabase } from '@/lib/supabase';
 
@@ -8,10 +8,8 @@ type ChartData = {
     bucketKey: string;
     label: string;
     fullLabel: string;
-    // Percentages (what % of that cohort's total cancellations fell in this bucket).
-    trial3d: number;
+    trial3d: number;       // % of that cohort's cancellations
     trial7d: number;
-    // Raw counts for tooltips.
     trial3dCount: number;
     trial7dCount: number;
 };
@@ -27,13 +25,11 @@ type SupabaseRow = {
 };
 
 type Props = {
-    cohortDays?: number;        // size of the cohort window (default 30)
-    bufferDays?: number;        // min trial age to be considered fully resolved (default 8)
+    cohortDays?: number;
+    bufferDays?: number;
 };
 
-const BUCKET_HOURS = 6;
-const MAX_DAYS = 7;
-const NUM_BUCKETS = (MAX_DAYS * 24) / BUCKET_HOURS; // 28
+type Mode = 'full' | 'detail6h';
 
 function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
@@ -53,33 +49,56 @@ function fmtDate(d: Date): string {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function fmtMinutes(min: number): string {
+    if (min === 0) return '0m';
+    if (min < 60) return `${min}m`;
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return m === 0 ? `${h}h` : `${h}h${m}m`;
+}
+
+type BucketConfig = {
+    minutes: number;       // bucket size
+    maxMinutes: number;
+    numBuckets: number;
+    axisInterval: number;  // Recharts interval prop
+    shortLabel: (startMin: number) => string;
+};
+
+const FULL_CONFIG: BucketConfig = {
+    minutes: 6 * 60,
+    maxMinutes: 7 * 24 * 60,
+    numBuckets: 28,
+    axisInterval: 3,           // every 4th tick = every 24h = day boundary
+    shortLabel: (startMin) => startMin % (24 * 60) === 0 ? `D${startMin / 60 / 24}` : '',
+};
+
+const DETAIL_CONFIG: BucketConfig = {
+    minutes: 30,
+    maxMinutes: 6 * 60,
+    numBuckets: 12,
+    axisInterval: 1,           // every 2nd tick = every hour
+    shortLabel: (startMin) => startMin % 60 === 0 ? `${startMin / 60}h` : '',
+};
+
 export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8 }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [cancels3d, setCancels3d] = useState(0);
-    const [cancels7d, setCancels7d] = useState(0);
+    const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
     const [starts3d, setStarts3d] = useState(0);
     const [starts7d, setStarts7d] = useState(0);
     const [cohortRange, setCohortRange] = useState<{ start: Date; end: Date } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [mode, setMode] = useState<Mode>('full');
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
-
-            // Cohort: trials started between (now - cohortDays - bufferDays) and (now - bufferDays).
-            // All trials in this range are at least bufferDays old, so 3d and 7d trials have fully resolved.
             const now = Date.now();
             const cohortEnd = new Date(now - bufferDays * 86400000);
             const cohortStart = new Date(now - (cohortDays + bufferDays) * 86400000);
-            const cohortStartMs = cohortStart.getTime();
-            const cohortEndMs = cohortEnd.getTime();
 
-            // Paginated fetch helper.
             const fetchAll = async (
                 eventType: string,
-                gteCol: 'event_timestamp',
                 gteISO: string,
-                ltCol: 'event_timestamp' | null,
                 ltISO: string | null,
                 extraEq?: { cancel_reason?: string },
             ) => {
@@ -95,10 +114,10 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                         .select('product_id, event_timestamp, raw')
                         .eq('event_type', eventType)
                         .eq('period_type', 'TRIAL')
-                        .gte(gteCol, gteISO)
+                        .gte('event_timestamp', gteISO)
                         .order('event_timestamp', { ascending: false })
                         .range(from, to);
-                    if (ltCol && ltISO) q = q.lt(ltCol, ltISO);
+                    if (ltISO) q = q.lt('event_timestamp', ltISO);
                     if (extraEq?.cancel_reason) q = q.eq('cancel_reason', extraEq.cancel_reason);
                     const { data: batch, error } = await q;
                     if (error) { console.error('TrialCancellationChart fetch error:', error); return null; }
@@ -114,14 +133,19 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                 return out;
             };
 
-            // Trial starts: INITIAL_PURCHASE TRIAL events whose event_timestamp falls in the cohort window.
-            // Cancellations: CANCELLATION TRIAL UNSUBSCRIBE events from cohort onwards — filter client-side
-            // by raw.purchased_at_ms (the original trial start) to match the cohort.
-            const [startRows, cancelRows] = await Promise.all([
-                fetchAll('INITIAL_PURCHASE', 'event_timestamp', cohortStart.toISOString(), 'event_timestamp', cohortEnd.toISOString()),
-                fetchAll('CANCELLATION', 'event_timestamp', cohortStart.toISOString(), null, null, { cancel_reason: 'UNSUBSCRIBE' }),
+            const [startRows, rawCancels] = await Promise.all([
+                fetchAll('INITIAL_PURCHASE', cohortStart.toISOString(), cohortEnd.toISOString()),
+                fetchAll('CANCELLATION', cohortStart.toISOString(), null, { cancel_reason: 'UNSUBSCRIBE' }),
             ]);
-            if (!startRows || !cancelRows) { setLoading(false); return; }
+            if (!startRows || !rawCancels) { setLoading(false); return; }
+
+            // Filter cancellations to those whose underlying trial start falls in the cohort window.
+            const cohortStartMs = cohortStart.getTime();
+            const cohortEndMs = cohortEnd.getTime();
+            const cohortCancels = rawCancels.filter((r) => {
+                const pts = r.raw?.purchased_at_ms;
+                return pts !== undefined && pts >= cohortStartMs && pts < cohortEndMs;
+            });
 
             let s3 = 0, s7 = 0;
             for (const r of startRows) {
@@ -130,43 +154,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                 else if (len === 7) s7++;
             }
 
-            const buckets: ChartData[] = Array.from({ length: NUM_BUCKETS }, (_, i) => {
-                const startH = i * BUCKET_HOURS;
-                const endH = startH + BUCKET_HOURS;
-                const dayStart = startH / 24;
-                return {
-                    bucketKey: `h${startH}`,
-                    label: startH % 24 === 0 ? `D${dayStart}` : '',
-                    fullLabel: `Day ${Math.floor(dayStart)} — ${startH}h to ${endH}h after trial start`,
-                    trial3d: 0,
-                    trial7d: 0,
-                    trial3dCount: 0,
-                    trial7dCount: 0,
-                };
-            });
-
-            let c3 = 0, c7 = 0;
-            for (const r of cancelRows) {
-                const len = trialLengthDays(r);
-                const ets = r.raw?.event_timestamp_ms;
-                const pts = r.raw?.purchased_at_ms;
-                if (!len || !ets || !pts) continue;
-                if (pts < cohortStartMs || pts >= cohortEndMs) continue;
-                const elapsedHours = (ets - pts) / 3600000;
-                if (elapsedHours < 0 || elapsedHours >= MAX_DAYS * 24) continue;
-                const idx = Math.min(NUM_BUCKETS - 1, Math.floor(elapsedHours / BUCKET_HOURS));
-                if (len === 3) { buckets[idx].trial3dCount++; c3++; }
-                else { buckets[idx].trial7dCount++; c7++; }
-            }
-            // Convert raw counts to percentages of each cohort's total cancellations.
-            for (const b of buckets) {
-                b.trial3d = c3 > 0 ? (b.trial3dCount / c3) * 100 : 0;
-                b.trial7d = c7 > 0 ? (b.trial7dCount / c7) * 100 : 0;
-            }
-
-            setData(buckets);
-            setCancels3d(c3);
-            setCancels7d(c7);
+            setCancelRows(cohortCancels);
             setStarts3d(s3);
             setStarts7d(s7);
             setCohortRange({ start: cohortStart, end: cohortEnd });
@@ -174,6 +162,46 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
         };
         fetchData();
     }, [cohortDays, bufferDays]);
+
+    const { data, cancels3d, cancels7d } = useMemo(() => {
+        const cfg = mode === 'detail6h' ? DETAIL_CONFIG : FULL_CONFIG;
+
+        const buckets: ChartData[] = Array.from({ length: cfg.numBuckets }, (_, i) => {
+            const startMin = i * cfg.minutes;
+            const endMin = startMin + cfg.minutes;
+            return {
+                bucketKey: `b${startMin}`,
+                label: cfg.shortLabel(startMin),
+                fullLabel: `${fmtMinutes(startMin)} – ${fmtMinutes(endMin)} after trial start`,
+                trial3d: 0,
+                trial7d: 0,
+                trial3dCount: 0,
+                trial7dCount: 0,
+            };
+        });
+
+        let c3 = 0, c7 = 0;
+        for (const r of cancelRows) {
+            const len = trialLengthDays(r);
+            const ets = r.raw?.event_timestamp_ms;
+            const pts = r.raw?.purchased_at_ms;
+            if (!len || !ets || !pts) continue;
+            const elapsedMin = (ets - pts) / 60000;
+            // Cohort cancellations whose elapsed time is outside this view's window are skipped
+            // for the chart bars but still counted toward c3/c7 for the cohort total.
+            if (len === 3) c3++;
+            else if (len === 7) c7++;
+            if (elapsedMin < 0 || elapsedMin >= cfg.maxMinutes) continue;
+            const idx = Math.min(cfg.numBuckets - 1, Math.floor(elapsedMin / cfg.minutes));
+            if (len === 3) buckets[idx].trial3dCount++;
+            else buckets[idx].trial7dCount++;
+        }
+        for (const b of buckets) {
+            b.trial3d = c3 > 0 ? (b.trial3dCount / c3) * 100 : 0;
+            b.trial7d = c7 > 0 ? (b.trial7dCount / c7) * 100 : 0;
+        }
+        return { data: buckets, cancels3d: c3, cancels7d: c7 };
+    }, [cancelRows, mode]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col h-[460px] col-span-1 md:col-span-2">
@@ -193,10 +221,26 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 col-span-1 md:col-span-2">
-            <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
-                <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
-                    <span className="text-sm text-gray-500">{cohortLabel}</span>
+            <div className="flex flex-wrap justify-between items-start mb-6 gap-3">
+                <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                        <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
+                        <span className="text-sm text-gray-500">{cohortLabel}</span>
+                    </div>
+                    <div className="mt-3 bg-white p-0.5 rounded-md border border-gray-200 inline-flex">
+                        <button
+                            onClick={() => setMode('full')}
+                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'full' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            Full 7 days (6h)
+                        </button>
+                        <button
+                            onClick={() => setMode('detail6h')}
+                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail6h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                        >
+                            First 6 hours (30m)
+                        </button>
+                    </div>
                 </div>
                 <div className="text-right text-xs text-gray-400 leading-snug">
                     <div>{totalCancels} cancellations in cohort</div>
@@ -227,7 +271,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            interval={3}
+                            interval={(mode === 'detail6h' ? DETAIL_CONFIG : FULL_CONFIG).axisInterval}
                         />
                         <YAxis
                             tick={{ fontSize: 12, fill: '#6B7280' }}
