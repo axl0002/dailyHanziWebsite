@@ -29,7 +29,7 @@ type Props = {
     bufferDays?: number;
 };
 
-type Mode = 'full' | 'detail6h' | 'detail1h';
+type Mode = 'full' | 'detail6h' | 'detail30m';
 
 function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
@@ -81,16 +81,16 @@ const DETAIL_6H_CONFIG: BucketConfig = {
     shortLabel: (startMin) => startMin % 60 === 0 ? `${startMin / 60}h` : '',
 };
 
-const DETAIL_1H_CONFIG: BucketConfig = {
-    minutes: 5,
-    maxMinutes: 60,
-    numBuckets: 12,
-    axisInterval: 2,           // every 3rd tick = every 15 min
-    shortLabel: (startMin) => startMin % 15 === 0 ? `${startMin}m` : '',
+const DETAIL_30M_CONFIG: BucketConfig = {
+    minutes: 1,
+    maxMinutes: 30,
+    numBuckets: 30,
+    axisInterval: 4,           // every 5th tick = every 5 min
+    shortLabel: (startMin) => startMin % 5 === 0 ? `${startMin}m` : '',
 };
 
 function configFor(mode: Mode): BucketConfig {
-    if (mode === 'detail1h') return DETAIL_1H_CONFIG;
+    if (mode === 'detail30m') return DETAIL_30M_CONFIG;
     if (mode === 'detail6h') return DETAIL_6H_CONFIG;
     return FULL_CONFIG;
 }
@@ -271,10 +271,10 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                         First 6 hours (15m)
                     </button>
                     <button
-                        onClick={() => setMode('detail1h')}
-                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail1h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                        onClick={() => setMode('detail30m')}
+                        className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail30m' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
                     >
-                        First 1 hour (5m)
+                        First 30 min (1m)
                     </button>
                 </div>
             </div>
