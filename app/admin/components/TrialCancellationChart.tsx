@@ -5,9 +5,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { supabase } from '@/lib/supabase';
 
 type ChartData = {
-    bucketKey: string;   // unique key, used as XAxis dataKey
-    label: string;       // short axis label (only shown for day boundaries)
-    fullLabel: string;   // tooltip header
+    bucketKey: string;
+    label: string;
+    fullLabel: string;
     trial3d: number;
     trial7d: number;
     total: number;
@@ -15,6 +15,7 @@ type ChartData = {
 
 type SupabaseRow = {
     product_id: string | null;
+    event_timestamp: string;
     raw: {
         event_timestamp_ms?: number;
         purchased_at_ms?: number;
@@ -23,7 +24,8 @@ type SupabaseRow = {
 };
 
 type Props = {
-    windowDays?: number;
+    cohortDays?: number;        // size of the cohort window (default 30)
+    bufferDays?: number;        // min trial age to be considered fully resolved (default 8)
 };
 
 const BUCKET_HOURS = 6;
@@ -34,7 +36,6 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
     if (pid.endsWith('_3d')) return 3;
     if (pid.endsWith('_7d')) return 7;
-    // Fall back to actual trial duration for legacy product IDs without the suffix.
     const ets = row.raw?.expiration_at_ms;
     const pts = row.raw?.purchased_at_ms;
     if (ets && pts) {
@@ -45,22 +46,40 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     return null;
 }
 
-export default function TrialCancellationChart({ windowDays = 30 }: Props) {
+function fmtDate(d: Date): string {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8 }: Props) {
     const [data, setData] = useState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [totalInPeriod, setTotalInPeriod] = useState(0);
-    const [total3d, setTotal3d] = useState(0);
-    const [total7d, setTotal7d] = useState(0);
+    const [cancels3d, setCancels3d] = useState(0);
+    const [cancels7d, setCancels7d] = useState(0);
     const [starts3d, setStarts3d] = useState(0);
     const [starts7d, setStarts7d] = useState(0);
+    const [cohortRange, setCohortRange] = useState<{ start: Date; end: Date } | null>(null);
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
-            const since = new Date(Date.now() - windowDays * 86400000).toISOString();
+
+            // Cohort: trials started between (now - cohortDays - bufferDays) and (now - bufferDays).
+            // All trials in this range are at least bufferDays old, so 3d and 7d trials have fully resolved.
+            const now = Date.now();
+            const cohortEnd = new Date(now - bufferDays * 86400000);
+            const cohortStart = new Date(now - (cohortDays + bufferDays) * 86400000);
+            const cohortStartMs = cohortStart.getTime();
+            const cohortEndMs = cohortEnd.getTime();
 
             // Paginated fetch helper.
-            const fetchAll = async (eventType: string, extraEq?: { cancel_reason?: string }) => {
+            const fetchAll = async (
+                eventType: string,
+                gteCol: 'event_timestamp',
+                gteISO: string,
+                ltCol: 'event_timestamp' | null,
+                ltISO: string | null,
+                extraEq?: { cancel_reason?: string },
+            ) => {
                 const out: SupabaseRow[] = [];
                 let page = 0;
                 const pageSize = 1000;
@@ -70,12 +89,13 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                     const to = from + pageSize - 1;
                     let q = supabase
                         .from('subscription_events')
-                        .select('product_id, raw')
+                        .select('product_id, event_timestamp, raw')
                         .eq('event_type', eventType)
                         .eq('period_type', 'TRIAL')
-                        .gte('event_timestamp', since)
+                        .gte(gteCol, gteISO)
                         .order('event_timestamp', { ascending: false })
                         .range(from, to);
+                    if (ltCol && ltISO) q = q.lt(ltCol, ltISO);
                     if (extraEq?.cancel_reason) q = q.eq('cancel_reason', extraEq.cancel_reason);
                     const { data: batch, error } = await q;
                     if (error) { console.error('TrialCancellationChart fetch error:', error); return null; }
@@ -91,11 +111,14 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                 return out;
             };
 
-            const [rows, startRows] = await Promise.all([
-                fetchAll('CANCELLATION', { cancel_reason: 'UNSUBSCRIBE' }),
-                fetchAll('INITIAL_PURCHASE'),
+            // Trial starts: INITIAL_PURCHASE TRIAL events whose event_timestamp falls in the cohort window.
+            // Cancellations: CANCELLATION TRIAL UNSUBSCRIBE events from cohort onwards — filter client-side
+            // by raw.purchased_at_ms (the original trial start) to match the cohort.
+            const [startRows, cancelRows] = await Promise.all([
+                fetchAll('INITIAL_PURCHASE', 'event_timestamp', cohortStart.toISOString(), 'event_timestamp', cohortEnd.toISOString()),
+                fetchAll('CANCELLATION', 'event_timestamp', cohortStart.toISOString(), null, null, { cancel_reason: 'UNSUBSCRIBE' }),
             ]);
-            if (!rows || !startRows) { setLoading(false); return; }
+            if (!startRows || !cancelRows) { setLoading(false); return; }
 
             let s3 = 0, s7 = 0;
             for (const r of startRows) {
@@ -118,32 +141,32 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                 };
             });
 
-            let inPeriodCount = 0;
-            let t3 = 0, t7 = 0;
-            for (const r of rows) {
+            let c3 = 0, c7 = 0;
+            for (const r of cancelRows) {
                 const len = trialLengthDays(r);
                 const ets = r.raw?.event_timestamp_ms;
                 const pts = r.raw?.purchased_at_ms;
                 if (!len || !ets || !pts) continue;
+                // Filter to cohort: trial start must fall in the cohort window.
+                if (pts < cohortStartMs || pts >= cohortEndMs) continue;
                 const elapsedHours = (ets - pts) / 3600000;
                 if (elapsedHours < 0 || elapsedHours >= MAX_DAYS * 24) continue;
                 const idx = Math.min(NUM_BUCKETS - 1, Math.floor(elapsedHours / BUCKET_HOURS));
-                if (len === 3) { buckets[idx].trial3d++; t3++; }
-                else { buckets[idx].trial7d++; t7++; }
+                if (len === 3) { buckets[idx].trial3d++; c3++; }
+                else { buckets[idx].trial7d++; c7++; }
                 buckets[idx].total++;
-                inPeriodCount++;
             }
 
             setData(buckets);
-            setTotalInPeriod(inPeriodCount);
-            setTotal3d(t3);
-            setTotal7d(t7);
+            setCancels3d(c3);
+            setCancels7d(c7);
             setStarts3d(s3);
             setStarts7d(s7);
+            setCohortRange({ start: cohortStart, end: cohortEnd });
             setLoading(false);
         };
         fetchData();
-    }, [windowDays]);
+    }, [cohortDays, bufferDays]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col h-[460px] col-span-1 md:col-span-2">
@@ -156,27 +179,31 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
 
     const labelByKey: Record<string, string> = {};
     data.forEach((d) => { labelByKey[d.bucketKey] = d.label; });
+    const totalCancels = cancels3d + cancels7d;
+    const cohortLabel = cohortRange
+        ? `Cohort: trials started ${fmtDate(cohortRange.start)} – ${fmtDate(cohortRange.end)} (fully resolved)`
+        : '';
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 col-span-1 md:col-span-2">
             <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
                 <div className="flex items-center gap-3">
                     <h3 className="text-lg font-bold text-gray-900">Trial Cancellation Timing</h3>
-                    <span className="text-sm text-gray-500">Last {windowDays} days</span>
+                    <span className="text-sm text-gray-500">{cohortLabel}</span>
                 </div>
                 <div className="text-right text-xs text-gray-400 leading-snug">
-                    <div>{totalInPeriod} cancellations in period</div>
+                    <div>{totalCancels} cancellations in cohort</div>
                     <div>
                         <span className="text-indigo-600 font-medium">
-                            {starts7d > 0 ? `${((total7d / starts7d) * 100).toFixed(1)}%` : '—'}
+                            {starts7d > 0 ? `${((cancels7d / starts7d) * 100).toFixed(1)}%` : '—'}
                         </span>
-                        {' '}of 7-day trials
+                        {' '}of {starts7d} 7-day trials
                     </div>
                     <div>
                         <span className="text-purple-500 font-medium">
-                            {starts3d > 0 ? `${((total3d / starts3d) * 100).toFixed(1)}%` : '—'}
+                            {starts3d > 0 ? `${((cancels3d / starts3d) * 100).toFixed(1)}%` : '—'}
                         </span>
-                        {' '}of 3-day trials
+                        {' '}of {starts3d} 3-day trials
                     </div>
                 </div>
             </div>
@@ -213,7 +240,7 @@ export default function TrialCancellationChart({ windowDays = 30 }: Props) {
                                                 const is7d = entry.name === '7-day trial';
                                                 const colorClass = is7d ? 'text-indigo-600' : 'text-purple-600';
                                                 const value = entry.value as number;
-                                                const cohortTotal = is7d ? total7d : total3d;
+                                                const cohortTotal = is7d ? cancels7d : cancels3d;
                                                 const percentage = cohortTotal > 0 ? ((value / cohortTotal) * 100).toFixed(1) : '0.0';
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">
