@@ -74,10 +74,10 @@ const FULL_CONFIG: BucketConfig = {
 };
 
 const DETAIL_CONFIG: BucketConfig = {
-    minutes: 30,
+    minutes: 15,
     maxMinutes: 6 * 60,
-    numBuckets: 12,
-    axisInterval: 1,           // every 2nd tick = every hour
+    numBuckets: 24,
+    axisInterval: 3,           // every 4th tick = every hour
     shortLabel: (startMin) => startMin % 60 === 0 ? `${startMin / 60}h` : '',
 };
 
@@ -238,7 +238,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                             onClick={() => setMode('detail6h')}
                             className={`px-3 py-1 text-xs font-medium rounded transition-colors ${mode === 'detail6h' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
                         >
-                            First 6 hours (30m)
+                            First 6 hours (15m)
                         </button>
                     </div>
                 </div>
