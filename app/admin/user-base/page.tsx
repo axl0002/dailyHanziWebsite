@@ -12,13 +12,16 @@ type UserRow = {
     created_at: string;
 };
 
-export default function BetaAccessPage() {
+export default function UserBasePage() {
     const [query, setQuery] = useState("");
     const [users, setUsers] = useState<UserRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [savingId, setSavingId] = useState<string | null>(null);
     const [hasSearched, setHasSearched] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
+    const [deleteConfirmText, setDeleteConfirmText] = useState("");
+    const [deleting, setDeleting] = useState(false);
 
     const runSearch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -53,7 +56,6 @@ export default function BetaAccessPage() {
                 .eq("id", user.id)
                 .select("id");
             if (uerr) throw new Error(uerr.message);
-            // Supabase returns success with an empty array when RLS silently blocks the write.
             if (!data || data.length === 0) {
                 throw new Error("Update did not affect any rows — likely blocked by RLS. Ask engineering to add an UPDATE policy on profiles for admins.");
             }
@@ -65,11 +67,49 @@ export default function BetaAccessPage() {
         }
     };
 
+    const openDelete = (user: UserRow) => {
+        setDeleteTarget(user);
+        setDeleteConfirmText("");
+        setError(null);
+    };
+
+    const cancelDelete = () => {
+        if (deleting) return;
+        setDeleteTarget(null);
+        setDeleteConfirmText("");
+    };
+
+    const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        setDeleting(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/admin/delete-user", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: deleteTarget.id }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || `Delete failed (${res.status})`);
+            setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
+            setDeleteTarget(null);
+            setDeleteConfirmText("");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unknown error");
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const canConfirmDelete = deleteTarget != null
+        && deleteConfirmText.trim().toLowerCase() === (deleteTarget.email || "").trim().toLowerCase()
+        && !deleting;
+
     return (
         <div>
             <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-900">Beta Access</h1>
-                <p className="text-gray-600 mt-1">Search users by email and grant or revoke beta access.</p>
+                <h1 className="text-2xl font-bold text-gray-900">User Base</h1>
+                <p className="text-gray-600 mt-1">Search users by email to manage beta access or delete accounts.</p>
             </div>
 
             <form onSubmit={runSearch} className="mb-6 flex gap-2">
@@ -104,7 +144,7 @@ export default function BetaAccessPage() {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Beta</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -130,18 +170,26 @@ export default function BetaAccessPage() {
                                     {new Date(user.created_at).toLocaleDateString()}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-right">
-                                    <button
-                                        onClick={() => toggleBeta(user)}
-                                        disabled={savingId === user.id}
-                                        className={`px-3 py-1 text-sm font-medium rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${user.is_beta
-                                            ? 'border-red-200 text-red-700 hover:bg-red-50'
-                                            : 'border-green-200 text-green-700 hover:bg-green-50'
-                                            }`}
-                                    >
-                                        {savingId === user.id
-                                            ? "Saving…"
-                                            : user.is_beta ? "Revoke beta" : "Grant beta"}
-                                    </button>
+                                    <div className="flex justify-end gap-2">
+                                        <button
+                                            onClick={() => toggleBeta(user)}
+                                            disabled={savingId === user.id}
+                                            className={`px-3 py-1 text-sm font-medium rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${user.is_beta
+                                                ? 'border-red-200 text-red-700 hover:bg-red-50'
+                                                : 'border-green-200 text-green-700 hover:bg-green-50'
+                                                }`}
+                                        >
+                                            {savingId === user.id
+                                                ? "Saving…"
+                                                : user.is_beta ? "Revoke beta" : "Grant beta"}
+                                        </button>
+                                        <button
+                                            onClick={() => openDelete(user)}
+                                            className="px-3 py-1 text-sm font-medium rounded-md border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}
@@ -164,6 +212,45 @@ export default function BetaAccessPage() {
             </div>
             {users.length === 25 && (
                 <p className="mt-3 text-xs text-gray-500">Showing first 25 matches. Refine your search if the user isn&apos;t here.</p>
+            )}
+
+            {deleteTarget && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={cancelDelete}>
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+                        <h2 className="text-lg font-bold text-gray-900 mb-2">Delete user account</h2>
+                        <p className="text-sm text-gray-600 mb-4">
+                            This will permanently delete <strong>{deleteTarget.email || deleteTarget.id}</strong> and all their data. This cannot be undone.
+                        </p>
+                        <p className="text-sm text-gray-700 mb-2">
+                            Type the user&apos;s email to confirm:
+                        </p>
+                        <input
+                            type="text"
+                            value={deleteConfirmText}
+                            onChange={(e) => setDeleteConfirmText(e.target.value)}
+                            placeholder={deleteTarget.email || ""}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:border-red-500 text-sm"
+                            autoFocus
+                            disabled={deleting}
+                        />
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button
+                                onClick={cancelDelete}
+                                disabled={deleting}
+                                className="px-4 py-2 text-sm font-medium border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                disabled={!canConfirmDelete}
+                                className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {deleting ? "Deleting…" : "Delete permanently"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
