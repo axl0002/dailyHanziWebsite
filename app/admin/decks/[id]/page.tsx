@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import AddCharactersModal from "../AddCharactersModal";
 
 type Category = {
     id: number;
@@ -35,6 +36,8 @@ export default function DeckDetailPage() {
     const [error, setError] = useState<string | null>(null);
     const [sortField, setSortField] = useState<SortField>('freq_rank');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+    const [removingId, setRemovingId] = useState<number | null>(null);
+    const [showAdd, setShowAdd] = useState(false);
 
     const load = useCallback(async () => {
         if (Number.isNaN(categoryId)) {
@@ -85,6 +88,26 @@ export default function DeckDetailPage() {
     const sortIndicator = (field: SortField) =>
         sortField === field ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
 
+    const removeCharacter = async (c: Character) => {
+        if (!confirm(`Remove "${c.character}" from this deck?`)) return;
+        setRemovingId(c.id);
+        setError(null);
+        try {
+            const { data, error: uerr } = await supabase
+                .from("characters")
+                .update({ category: null })
+                .eq("id", c.id)
+                .select("id");
+            if (uerr) throw new Error(uerr.message);
+            if (!data || data.length === 0) throw new Error("Update blocked by RLS.");
+            setCharacters((prev) => prev.filter((x) => x.id !== c.id));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unknown error");
+        } finally {
+            setRemovingId(null);
+        }
+    };
+
     return (
         <div>
             <div className="mb-4">
@@ -94,17 +117,25 @@ export default function DeckDetailPage() {
             </div>
 
             {category && (
-                <div className="mb-6 flex items-center gap-3">
-                    <span className="text-3xl" aria-hidden>{category.emoji || "📁"}</span>
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                            {category.name}
-                            {!category.visible && (
-                                <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">hidden</span>
-                            )}
-                        </h1>
-                        <p className="text-gray-600 mt-1">{characters.length} character{characters.length === 1 ? "" : "s"}</p>
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <span className="text-3xl" aria-hidden>{category.emoji || "📁"}</span>
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                                {category.name}
+                                {!category.visible && (
+                                    <span className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">hidden</span>
+                                )}
+                            </h1>
+                            <p className="text-gray-600 mt-1">{characters.length} character{characters.length === 1 ? "" : "s"}</p>
+                        </div>
                     </div>
+                    <button
+                        onClick={() => setShowAdd(true)}
+                        className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                    >
+                        + Add characters
+                    </button>
                 </div>
             )}
 
@@ -139,6 +170,7 @@ export default function DeckDetailPage() {
                                     Freq{sortIndicator('freq_rank')}
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Visible</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -156,11 +188,20 @@ export default function DeckDetailPage() {
                                             {c.visible ? 'Yes' : 'No'}
                                         </span>
                                     </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                                        <button
+                                            onClick={() => removeCharacter(c)}
+                                            disabled={removingId === c.id}
+                                            className="px-2.5 py-1 text-xs font-medium border border-red-200 text-red-700 rounded hover:bg-red-50 disabled:opacity-50"
+                                        >
+                                            {removingId === c.id ? "Removing…" : "Remove"}
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                             {characters.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-sm text-gray-500">
+                                    <td colSpan={9} className="px-6 py-8 text-center text-sm text-gray-500">
                                         No characters in this deck.
                                     </td>
                                 </tr>
@@ -168,6 +209,15 @@ export default function DeckDetailPage() {
                         </tbody>
                     </table>
                 </div>
+            )}
+
+            {category && (
+                <AddCharactersModal
+                    open={showAdd}
+                    onClose={() => setShowAdd(false)}
+                    onAdded={load}
+                    categoryName={category.name}
+                />
             )}
         </div>
     );
