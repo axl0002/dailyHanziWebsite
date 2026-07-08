@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+function bucketLabel(bucketKey: string): string {
+    // "1-early" → "HSK 1 easy", "1-late" → "HSK 1 hard", etc.
+    const match = bucketKey.match(/^(\d+)-(early|late)$/);
+    if (!match) return bucketKey;
+    const [, level, phase] = match;
+    return `HSK ${level} ${phase === 'early' ? 'easy' : 'hard'}`;
+}
+
 type Paragraph = {
     id: number;
     bucket_key: string;
@@ -106,7 +114,7 @@ export default function ParagraphsPage() {
                     >
                         <option value="">All buckets</option>
                         {availableBuckets.map((b) => (
-                            <option key={b} value={b}>{b}</option>
+                            <option key={b} value={b}>{bucketLabel(b)}</option>
                         ))}
                     </select>
                 </div>
@@ -148,7 +156,7 @@ function ParagraphCard({ p }: { p: Paragraph }) {
                     {p.paragraph_date}
                 </span>
                 <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full font-medium">
-                    {p.bucket_key}
+                    {bucketLabel(p.bucket_key)}
                 </span>
                 <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">
                     variant {p.variant}
