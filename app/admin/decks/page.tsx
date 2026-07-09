@@ -121,51 +121,83 @@ export default function DecksPage() {
                     Loading decks…
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {categories.map((cat) => (
-                        <div
-                            key={cat.id}
-                            onClick={() => router.push(`/admin/decks/${cat.id}`)}
-                            className="bg-white rounded-lg shadow-sm border border-gray-100 p-5 hover:shadow-md hover:border-indigo-200 transition cursor-pointer"
-                        >
-                            <div className="flex items-start justify-between mb-2">
-                                <span className="text-3xl" aria-hidden>{cat.emoji || "📁"}</span>
-                                <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full font-mono">
-                                    {counts[cat.name] ?? 0} chars
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2 mb-1">
-                                <h3 className="text-base font-bold text-gray-900">{cat.name}</h3>
-                                {!cat.visible && (
-                                    <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-medium">
-                                        hidden
-                                    </span>
-                                )}
-                            </div>
-                            {cat.abbreviation && cat.abbreviation !== cat.name && (
-                                <p className="text-xs text-gray-500 mb-3">{cat.abbreviation}</p>
+                <div className="bg-white shadow-md rounded-lg overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12"></th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Abbreviation</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chars</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Visibility</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {categories.map((cat) => (
+                                <tr
+                                    key={cat.id}
+                                    onClick={() => router.push(`/admin/decks/${cat.id}`)}
+                                    className="hover:bg-gray-50 cursor-pointer"
+                                >
+                                    <td className="px-4 py-3 whitespace-nowrap text-2xl" aria-hidden>
+                                        {cat.emoji || "📁"}
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium text-gray-900">{cat.name}</span>
+                                            {!cat.visible && (
+                                                <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-medium">hidden</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500">
+                                        {cat.abbreviation || "—"}
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-700 font-mono">
+                                        {counts[cat.name] ?? 0}
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-sm text-gray-500 font-mono">
+                                        {cat.ordering ?? "—"}
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cat.visible ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                            {cat.visible ? 'Visible' : 'Hidden'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-3 whitespace-nowrap text-right">
+                                        <div className="flex justify-end gap-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); toggleVisibility(cat); }}
+                                                disabled={busyId === cat.id}
+                                                className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${cat.visible
+                                                    ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                    : 'border-green-200 text-green-700 hover:bg-green-50'
+                                                    }`}
+                                            >
+                                                {cat.visible ? 'Hide' : 'Make visible'}
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); deleteDeck(cat); }}
+                                                disabled={busyId === cat.id}
+                                                className="px-2.5 py-1 text-xs font-medium border border-red-200 text-red-700 rounded hover:bg-red-50 disabled:opacity-50"
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {categories.length === 0 && (
+                                <tr>
+                                    <td colSpan={7} className="px-6 py-8 text-center text-sm text-gray-500">
+                                        No decks yet.
+                                    </td>
+                                </tr>
                             )}
-                            <div className="mt-3 flex gap-2 pt-3 border-t border-gray-100">
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); toggleVisibility(cat); }}
-                                    disabled={busyId === cat.id}
-                                    className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 ${cat.visible
-                                        ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                                        : 'border-green-200 text-green-700 hover:bg-green-50'
-                                        }`}
-                                >
-                                    {cat.visible ? 'Hide' : 'Make visible'}
-                                </button>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); deleteDeck(cat); }}
-                                    disabled={busyId === cat.id}
-                                    className="ml-auto px-2.5 py-1 text-xs font-medium border border-red-200 text-red-700 rounded hover:bg-red-50 disabled:opacity-50"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
 
