@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
@@ -35,6 +35,17 @@ type Props = {
     bufferDays?: number;
 };
 
+type ThresholdMin = 5 | 30 | 60 | 360 | 1440 | null; // null = full trial
+
+const THRESHOLDS: { key: string; value: ThresholdMin; label: string }[] = [
+    { key: 'all', value: null, label: 'Full trial' },
+    { key: '5m', value: 5, label: '≤ 5m' },
+    { key: '30m', value: 30, label: '≤ 30m' },
+    { key: '1h', value: 60, label: '≤ 1h' },
+    { key: '6h', value: 360, label: '≤ 6h' },
+    { key: '24h', value: 1440, label: '≤ 24h' },
+];
+
 function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
     const pid = row.product_id || '';
     if (pid.endsWith('_3d')) return 3;
@@ -60,10 +71,12 @@ function dateKey(ms: number): string {
 }
 
 export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLabel, onDeleteLabel, bufferDays = 8 }: Props) {
-    const [data, setData] = useState<DayStats[]>([]);
+    const [startRows, setStartRows] = useState<SupabaseRow[]>([]);
+    const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [days, setDays] = useState<14 | 30 | 60 | 90>(30);
     const [pageOffset, setPageOffset] = useState(0);
+    const [threshold, setThreshold] = useState<ThresholdMin>(null);
     const [labelModal, setLabelModal] = useState<{ date: string; position: { x: number; y: number } } | null>(null);
 
     // Cohort window ends `bufferDays` before now so 7-day trials are fully resolved.
@@ -126,56 +139,66 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                 return out;
             };
 
-            const [startRows, cancelRows] = await Promise.all([
+            const [starts, cancels] = await Promise.all([
                 fetchAll('INITIAL_PURCHASE', startDate.toISOString(), new Date(endDate.getTime() + 1).toISOString()),
                 fetchAll('CANCELLATION', startDate.toISOString(), cancelFetchEnd.toISOString(), 'UNSUBSCRIBE'),
             ]);
-            if (!startRows || !cancelRows) { setLoading(false); return; }
+            if (!starts || !cancels) { setLoading(false); return; }
 
-            const dailyStats: Record<string, DayStats> = {};
-            for (let i = 0; i < days; i++) {
-                const d = new Date(endDate);
-                d.setDate(d.getDate() - i);
-                const key = d.toISOString().split('T')[0];
-                dailyStats[key] = { date: key, starts3d: 0, starts7d: 0, cancels3d: 0, cancels7d: 0, rate3d: null, rate7d: null };
-            }
-
-            for (const r of startRows) {
-                const len = trialLengthDays(r);
-                if (!len) continue;
-                const pts = r.raw?.purchased_at_ms;
-                const key = pts ? dateKey(pts) : r.event_timestamp.split('T')[0];
-                if (!dailyStats[key]) continue;
-                if (len === 3) dailyStats[key].starts3d++;
-                else dailyStats[key].starts7d++;
-            }
-
-            const windowStartMs = startDate.getTime();
-            const windowEndMs = endDate.getTime();
-            for (const r of cancelRows) {
-                const len = trialLengthDays(r);
-                const pts = r.raw?.purchased_at_ms;
-                if (!len || !pts) continue;
-                if (pts < windowStartMs || pts > windowEndMs) continue;
-                const key = dateKey(pts);
-                if (!dailyStats[key]) continue;
-                if (len === 3) dailyStats[key].cancels3d++;
-                else dailyStats[key].cancels7d++;
-            }
-
-            const chartData = Object.values(dailyStats)
-                .map((d) => ({
-                    ...d,
-                    rate3d: d.starts3d > 0 ? Math.round((d.cancels3d / d.starts3d) * 1000) / 10 : null,
-                    rate7d: d.starts7d > 0 ? Math.round((d.cancels7d / d.starts7d) * 1000) / 10 : null,
-                }))
-                .sort((a, b) => a.date.localeCompare(b.date));
-
-            setData(chartData);
+            setStartRows(starts);
+            setCancelRows(cancels);
             setLoading(false);
         };
         fetchData();
     }, [days, pageOffset, getDateWindow]);
+
+    const data: DayStats[] = useMemo(() => {
+        const { startDate, endDate } = getDateWindow();
+        const dailyStats: Record<string, DayStats> = {};
+        for (let i = 0; i < days; i++) {
+            const d = new Date(endDate);
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().split('T')[0];
+            dailyStats[key] = { date: key, starts3d: 0, starts7d: 0, cancels3d: 0, cancels7d: 0, rate3d: null, rate7d: null };
+        }
+
+        for (const r of startRows) {
+            const len = trialLengthDays(r);
+            if (!len) continue;
+            const pts = r.raw?.purchased_at_ms;
+            const key = pts ? dateKey(pts) : r.event_timestamp.split('T')[0];
+            if (!dailyStats[key]) continue;
+            if (len === 3) dailyStats[key].starts3d++;
+            else dailyStats[key].starts7d++;
+        }
+
+        const windowStartMs = startDate.getTime();
+        const windowEndMs = endDate.getTime();
+        const thresholdMs = threshold !== null ? threshold * 60000 : null;
+        for (const r of cancelRows) {
+            const len = trialLengthDays(r);
+            const pts = r.raw?.purchased_at_ms;
+            const ets = r.raw?.event_timestamp_ms;
+            if (!len || !pts) continue;
+            if (pts < windowStartMs || pts > windowEndMs) continue;
+            if (thresholdMs !== null) {
+                if (!ets) continue;
+                if (ets - pts > thresholdMs) continue;
+            }
+            const key = dateKey(pts);
+            if (!dailyStats[key]) continue;
+            if (len === 3) dailyStats[key].cancels3d++;
+            else dailyStats[key].cancels7d++;
+        }
+
+        return Object.values(dailyStats)
+            .map((d) => ({
+                ...d,
+                rate3d: d.starts3d > 0 ? Math.round((d.cancels3d / d.starts3d) * 1000) / 10 : null,
+                rate7d: d.starts7d > 0 ? Math.round((d.cancels7d / d.starts7d) * 1000) / 10 : null,
+            }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [startRows, cancelRows, threshold, days, getDateWindow]);
 
     const { startDate, endDate } = getDateWindow();
     const startLabel = formatDateLabel(startDate.toISOString().split('T')[0]);
@@ -225,7 +248,12 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                         <span className="text-sm text-gray-500">{startLabel} – {endLabel}</span>
                     </div>
                     <div className="text-xs text-gray-400 leading-snug mt-2">
-                        <div>Cohorts through {bufferDays}d ago (fully resolved). Rate = cancels ÷ trial starts on that day.</div>
+                        <div>
+                            Cohorts through {bufferDays}d ago (fully resolved).{' '}
+                            {threshold === null
+                                ? 'Rate = any cancel ÷ trial starts on that day.'
+                                : `Rate = cancels within ${THRESHOLDS.find(t => t.value === threshold)?.label.replace('≤ ', '')} of trial start ÷ trial starts on that day.`}
+                        </div>
                         <div>
                             <span className="text-indigo-600 font-medium">
                                 Window avg 7-day: {avg7d !== null ? `${avg7d.toFixed(1)}%` : '—'}
@@ -237,7 +265,19 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-col items-end gap-2">
+                    <div className="bg-white p-0.5 rounded-md border border-gray-200 flex flex-wrap">
+                        {THRESHOLDS.map((t) => (
+                            <button
+                                key={t.key}
+                                onClick={() => setThreshold(t.value)}
+                                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${threshold === t.value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                {t.label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
                     <button
                         onClick={() => setPageOffset(prev => prev + 1)}
                         className="p-1.5 rounded-md border transition-colors text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-gray-900"
@@ -259,6 +299,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                     </button>
+                    </div>
                 </div>
             </div>
             <div className="h-[350px] w-full">
