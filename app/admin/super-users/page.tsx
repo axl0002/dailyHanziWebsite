@@ -28,6 +28,10 @@ export default function SuperUsersPage() {
     const [mode, setMode] = useState<Mode>('all');
     const [cancelledIds, setCancelledIds] = useState<string[] | null>(null);
     const [cancelledLoading, setCancelledLoading] = useState(false);
+    // In cancelled mode we fetch matching profiles in chunks (to keep the
+    // .in('id', […]) URL under proxy limits), cache the full set, then sort
+    // and paginate client-side.
+    const [cancelledProfiles, setCancelledProfiles] = useState<SuperUser[] | null>(null);
 
     // Sorting
     const [sortField, setSortField] = useState<SortField>('streak_days');
@@ -76,9 +80,69 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [mode, cancelledIds]);
 
+    // Load all cancelled profiles once (chunked to avoid URL length blowup),
+    // then sort + paginate in memory as sort/page changes.
+    useEffect(() => {
+        if (mode !== 'cancelled' || cancelledIds === null || cancelledProfiles !== null) return;
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                if (cancelledIds.length === 0) {
+                    if (!cancelled) setCancelledProfiles([]);
+                    return;
+                }
+                const chunkSize = 150;
+                const chunks: string[][] = [];
+                for (let i = 0; i < cancelledIds.length; i += chunkSize) {
+                    chunks.push(cancelledIds.slice(i, i + chunkSize));
+                }
+                const results = await Promise.all(
+                    chunks.map((chunk) =>
+                        supabase
+                            .from('profiles')
+                            .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                            .eq('is_beta', false)
+                            .in('id', chunk),
+                    ),
+                );
+                const merged: SuperUser[] = [];
+                for (const r of results) {
+                    if (r.error) throw new Error(r.error.message);
+                    if (r.data) merged.push(...(r.data as SuperUser[]));
+                }
+                if (!cancelled) setCancelledProfiles(merged);
+            } catch (err: unknown) {
+                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load cancelled profiles');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [mode, cancelledIds, cancelledProfiles]);
+
     const fetchUsers = useCallback(async () => {
-        // In cancelled mode, wait for the ID list to load first.
-        if (mode === 'cancelled' && cancelledIds === null) return;
+        if (mode === 'cancelled') {
+            // Wait until the cached list has arrived.
+            if (cancelledProfiles === null) return;
+            const sorted = [...cancelledProfiles].sort((a, b) => {
+                const dir = sortOrder === 'asc' ? 1 : -1;
+                const va = a[sortField];
+                const vb = b[sortField];
+                if (va === vb) return 0;
+                if (va === null || va === undefined) return 1;
+                if (vb === null || vb === undefined) return -1;
+                if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+                return String(va).localeCompare(String(vb)) * dir;
+            });
+            const from = page * pageSize;
+            const slice = sorted.slice(from, from + pageSize);
+            setUsers(slice);
+            setHasMore(sorted.length > from + pageSize);
+            setLoading(false);
+            return;
+        }
 
         setLoading(true);
         setError(null);
@@ -86,23 +150,10 @@ export default function SuperUsersPage() {
             const from = page * pageSize;
             const to = from + pageSize - 1;
 
-            let query = supabase
-                .from("profiles")
-                .select("id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at")
-                .eq('is_beta', false);
-
-            if (mode === 'cancelled') {
-                const ids = cancelledIds ?? [];
-                if (ids.length === 0) {
-                    setUsers([]);
-                    setHasMore(false);
-                    setLoading(false);
-                    return;
-                }
-                query = query.in('id', ids);
-            }
-
-            const { data, error: queryError } = await query
+            const { data, error: queryError } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                .eq('is_beta', false)
                 .order(sortField, { ascending: sortOrder === 'asc', nullsFirst: false })
                 .range(from, to);
 
@@ -111,12 +162,12 @@ export default function SuperUsersPage() {
             setUsers(data || []);
             setHasMore((data?.length || 0) === pageSize);
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : "Unknown error";
+            const message = err instanceof Error ? err.message : 'Unknown error';
             setError(message);
         } finally {
             setLoading(false);
         }
-    }, [sortField, sortOrder, page, mode, cancelledIds]);
+    }, [sortField, sortOrder, page, mode, cancelledProfiles]);
 
     useEffect(() => {
         fetchUsers();
@@ -156,7 +207,9 @@ export default function SuperUsersPage() {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const isBusy = loading || (mode === 'cancelled' && cancelledLoading && cancelledIds === null);
+    const isBusy = loading
+        || (mode === 'cancelled' && cancelledLoading && cancelledIds === null)
+        || (mode === 'cancelled' && cancelledIds !== null && cancelledProfiles === null);
 
     return (
         <div>
