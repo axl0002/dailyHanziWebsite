@@ -19,16 +19,6 @@ type SortField = 'streak_days' | 'longest_streak_days' | 'full_name' | 'created_
 type SortOrder = 'asc' | 'desc';
 type Mode = 'all' | 'cancelled';
 
-// Detect at runtime which column on subscription_events links to profiles.id.
-// Tries app_user_id first (RevenueCat default), then user_id.
-async function detectUserFkColumn(): Promise<'app_user_id' | 'user_id' | null> {
-    const probe = await supabase.from('subscription_events').select('app_user_id').limit(1);
-    if (!probe.error) return 'app_user_id';
-    const probe2 = await supabase.from('subscription_events').select('user_id').limit(1);
-    if (!probe2.error) return 'user_id';
-    return null;
-}
-
 export default function SuperUsersPage() {
     const [users, setUsers] = useState<SuperUser[]>([]);
     const [loading, setLoading] = useState(true);
@@ -55,11 +45,6 @@ export default function SuperUsersPage() {
         (async () => {
             setCancelledLoading(true);
             try {
-                const fk = await detectUserFkColumn();
-                if (!fk) {
-                    if (!cancelled) setError("Couldn't detect user FK column on subscription_events (tried app_user_id, user_id).");
-                    return;
-                }
                 const ids = new Set<string>();
                 let pageIdx = 0;
                 const size = 1000;
@@ -68,15 +53,14 @@ export default function SuperUsersPage() {
                     const to = from + size - 1;
                     const { data, error: qErr } = await supabase
                         .from('subscription_events')
-                        .select(fk)
+                        .select('user_id')
                         .eq('event_type', 'CANCELLATION')
                         .eq('cancel_reason', 'UNSUBSCRIBE')
                         .range(from, to);
                     if (qErr) throw new Error(qErr.message);
                     if (!data || data.length === 0) break;
-                    for (const row of data as Record<string, unknown>[]) {
-                        const v = row[fk];
-                        if (typeof v === 'string') ids.add(v);
+                    for (const row of data as { user_id: string | null }[]) {
+                        if (row.user_id) ids.add(row.user_id);
                     }
                     if (data.length < size) break;
                     pageIdx++;
