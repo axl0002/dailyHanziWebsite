@@ -59,3 +59,14 @@ create policy staff_all_example_sentences on public.example_sentences
 drop policy if exists staff_select_categories on public.categories;
 create policy staff_select_categories on public.categories
   for select to authenticated using (public.is_staff());
+
+-- Account deletion requests: staff list them on /admin/deletion-requests and
+-- mark them processed after removing the user.
+drop policy if exists staff_all_deletion_requests on public.deletion_requests;
+create policy staff_all_deletion_requests on public.deletion_requests
+  for all to authenticated using (public.is_staff()) with check (public.is_staff());
+
+-- Feedback: staff read user feedback on /admin/feedback.
+drop policy if exists staff_select_feedback on public.feedback;
+create policy staff_select_feedback on public.feedback
+  for select to authenticated using (public.is_staff());
