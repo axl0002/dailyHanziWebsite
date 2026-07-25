@@ -19,6 +19,7 @@ type LikedFilter = "all" | "liked" | "disliked" | "unrated";
 type FeedbackUser = {
     email: string | null;
     timezone: string | null;
+    platform: string | null;
 };
 
 export default function FeedbackPage() {
@@ -65,13 +66,17 @@ export default function FeedbackPage() {
             if (userIds.length > 0) {
                 const { data: profiles, error: profileErr } = await supabase
                     .from("profiles")
-                    .select("id, email, timezone")
+                    .select("id, email, timezone, platform")
                     .in("id", userIds);
                 if (profileErr) throw profileErr;
 
                 const map: Record<string, FeedbackUser> = {};
                 for (const p of profiles || []) {
-                    map[p.id] = { email: p.email ?? null, timezone: p.timezone ?? null };
+                    map[p.id] = {
+                        email: p.email ?? null,
+                        timezone: p.timezone ?? null,
+                        platform: p.platform ?? null,
+                    };
                 }
                 setUsersById(map);
             } else {
@@ -227,7 +232,7 @@ export default function FeedbackPage() {
                                                         {usersById[row.user_id]?.email || "Unknown email"}
                                                     </span>
                                                     <span className="text-xs text-gray-500">
-                                                        {usersById[row.user_id]?.timezone || "No timezone"}
+                                                        {usersById[row.user_id]?.platform || "No platform"} · {usersById[row.user_id]?.timezone || "No timezone"}
                                                     </span>
                                                     <span className="text-xs text-gray-400 font-mono mt-1">
                                                         ID: {row.user_id}
