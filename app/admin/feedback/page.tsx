@@ -31,6 +31,7 @@ export default function FeedbackPage() {
     const [sortField, setSortField] = useState<SortField>("created_at");
     const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
     const [likedFilter, setLikedFilter] = useState<LikedFilter>("all");
+    const [search, setSearch] = useState("");
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
         user: true,
@@ -93,17 +94,30 @@ export default function FeedbackPage() {
         fetchFeedback();
     }, [fetchFeedback]);
 
+    const filteredRows = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return rows;
+        return rows.filter((r) => {
+            const email = r.user_id ? usersById[r.user_id]?.email ?? "" : "";
+            return (
+                (r.improvement ?? "").toLowerCase().includes(q) ||
+                (r.missing ?? "").toLowerCase().includes(q) ||
+                email.toLowerCase().includes(q)
+            );
+        });
+    }, [rows, usersById, search]);
+
     const stats = useMemo(() => {
-        const total = rows.length;
-        const liked = rows.filter((r) => r.liked === true).length;
-        const disliked = rows.filter((r) => r.liked === false).length;
-        const unrated = rows.filter((r) => r.liked === null).length;
-        const withImprovement = rows.filter((r) => r.improvement && r.improvement.trim().length > 0).length;
-        const withMissing = rows.filter((r) => r.missing && r.missing.trim().length > 0).length;
+        const total = filteredRows.length;
+        const liked = filteredRows.filter((r) => r.liked === true).length;
+        const disliked = filteredRows.filter((r) => r.liked === false).length;
+        const unrated = filteredRows.filter((r) => r.liked === null).length;
+        const withImprovement = filteredRows.filter((r) => r.improvement && r.improvement.trim().length > 0).length;
+        const withMissing = filteredRows.filter((r) => r.missing && r.missing.trim().length > 0).length;
         const rated = liked + disliked;
         const likedPct = rated > 0 ? Math.round((liked / rated) * 100) : null;
         return { total, liked, disliked, unrated, withImprovement, withMissing, likedPct };
-    }, [rows]);
+    }, [filteredRows]);
 
     const handleSort = (field: SortField) => {
         if (sortField === field) {
@@ -144,19 +158,39 @@ export default function FeedbackPage() {
             )}
 
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-                <div className="bg-white p-1 rounded-lg border border-gray-200 flex shadow-sm">
-                    {(["all", "liked", "disliked", "unrated"] as LikedFilter[]).map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setLikedFilter(f)}
-                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors capitalize ${likedFilter === f
-                                ? "bg-indigo-50 text-indigo-700"
-                                : "text-gray-600 hover:text-gray-900"
-                                }`}
-                        >
-                            {f}
-                        </button>
-                    ))}
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="bg-white p-1 rounded-lg border border-gray-200 flex shadow-sm">
+                        {(["all", "liked", "disliked", "unrated"] as LikedFilter[]).map((f) => (
+                            <button
+                                key={f}
+                                onClick={() => setLikedFilter(f)}
+                                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors capitalize ${likedFilter === f
+                                    ? "bg-indigo-50 text-indigo-700"
+                                    : "text-gray-600 hover:text-gray-900"
+                                    }`}
+                            >
+                                {f}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="relative">
+                        <input
+                            type="text"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search text or email..."
+                            className="pl-3 pr-8 py-2 text-sm border border-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 w-64"
+                        />
+                        {search && (
+                            <button
+                                onClick={() => setSearch("")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                                title="Clear"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2 items-center justify-end">
@@ -222,7 +256,7 @@ export default function FeedbackPage() {
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {rows.map((row) => (
+                            {filteredRows.map((row) => (
                                 <tr key={row.id}>
                                     {visibleColumns.user && (
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -265,10 +299,10 @@ export default function FeedbackPage() {
                                     )}
                                 </tr>
                             ))}
-                            {rows.length === 0 && (
+                            {filteredRows.length === 0 && (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
-                                        No feedback found.
+                                        {search ? `No feedback matching "${search}".` : "No feedback found."}
                                     </td>
                                 </tr>
                             )}
