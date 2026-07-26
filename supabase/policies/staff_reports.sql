@@ -70,3 +70,8 @@ create policy staff_all_deletion_requests on public.deletion_requests
 drop policy if exists staff_select_feedback on public.feedback;
 create policy staff_select_feedback on public.feedback
   for select to authenticated using (public.is_staff());
+
+-- Trial cancellation charts on the admin dashboard read RevenueCat events.
+drop policy if exists staff_select_subscription_events on public.subscription_events;
+create policy staff_select_subscription_events on public.subscription_events
+  for select to authenticated using (public.is_staff());
