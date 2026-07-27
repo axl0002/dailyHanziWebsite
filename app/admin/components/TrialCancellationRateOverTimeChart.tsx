@@ -32,7 +32,12 @@ type Props = {
     dateLabels: Record<string, DateLabel[]>;
     onAddLabel: (date: string, label: string) => Promise<void>;
     onDeleteLabel: (id: string) => Promise<void>;
-    bufferDays?: number;
+    // Window end: 3-day trials + 0d late-cancel buffer past this point
+    // are considered resolved. Line for 3-day trials extends this far.
+    endBufferDays?: number;
+    // Days past which 7-day trials are considered fully resolved.
+    // The 7-day line is dropped (null) for days newer than this.
+    resolvedBufferDays?: number;
 };
 
 type ThresholdMin = 5 | 30 | 60 | 360 | 1440 | null; // null = full trial
@@ -70,7 +75,7 @@ function dateKey(ms: number): string {
     return new Date(ms).toISOString().split('T')[0];
 }
 
-export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLabel, onDeleteLabel, bufferDays = 8 }: Props) {
+export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLabel, onDeleteLabel, endBufferDays = 3, resolvedBufferDays = 8 }: Props) {
     const [startRows, setStartRows] = useState<SupabaseRow[]>([]);
     const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -79,10 +84,12 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
     const [threshold, setThreshold] = useState<ThresholdMin>(null);
     const [labelModal, setLabelModal] = useState<{ date: string; position: { x: number; y: number } } | null>(null);
 
-    // Cohort window ends `bufferDays` before now so 7-day trials are fully resolved.
+    // Cohort window ends `endBufferDays` before now — far enough that 3-day
+    // trials starting on the end date are resolved. The 7-day line is masked
+    // for days newer than `resolvedBufferDays` ago (see below).
     const getDateWindow = useCallback(() => {
         const endDate = new Date();
-        endDate.setDate(endDate.getDate() - bufferDays - pageOffset * days);
+        endDate.setDate(endDate.getDate() - endBufferDays - pageOffset * days);
         endDate.setHours(23, 59, 59, 999);
 
         const startDate = new Date(endDate);
@@ -90,7 +97,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
         startDate.setHours(0, 0, 0, 0);
 
         return { startDate, endDate };
-    }, [days, pageOffset, bufferDays]);
+    }, [days, pageOffset, endBufferDays]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -191,25 +198,40 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
             else dailyStats[key].cancels7d++;
         }
 
+        // 7-day trial line is only meaningful once trials starting on that
+        // day have had a full 7 days (plus late-cancel buffer) to resolve.
+        const resolvedCutoff = new Date();
+        resolvedCutoff.setDate(resolvedCutoff.getDate() - resolvedBufferDays);
+        const resolvedCutoffKey = resolvedCutoff.toISOString().split('T')[0];
+
         return Object.values(dailyStats)
             .map((d) => ({
                 ...d,
                 rate3d: d.starts3d > 0 ? Math.round((d.cancels3d / d.starts3d) * 1000) / 10 : null,
-                rate7d: d.starts7d > 0 ? Math.round((d.cancels7d / d.starts7d) * 1000) / 10 : null,
+                rate7d: d.date <= resolvedCutoffKey && d.starts7d > 0
+                    ? Math.round((d.cancels7d / d.starts7d) * 1000) / 10
+                    : null,
             }))
             .sort((a, b) => a.date.localeCompare(b.date));
-    }, [startRows, cancelRows, threshold, days, getDateWindow]);
+    }, [startRows, cancelRows, threshold, days, getDateWindow, resolvedBufferDays]);
 
     const { startDate, endDate } = getDateWindow();
     const startLabel = formatDateLabel(startDate.toISOString().split('T')[0]);
     const endLabel = formatDateLabel(endDate.toISOString().split('T')[0]);
 
+    // Recompute the resolved cutoff here to exclude unresolved 7-day cohorts
+    // from the 7-day window average (they'd drag it down artificially).
+    const resolvedCutoffKey = (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - resolvedBufferDays);
+        return d.toISOString().split('T')[0];
+    })();
     const totals = data.reduce(
         (acc, d) => ({
             starts3d: acc.starts3d + d.starts3d,
-            starts7d: acc.starts7d + d.starts7d,
+            starts7d: acc.starts7d + (d.date <= resolvedCutoffKey ? d.starts7d : 0),
             cancels3d: acc.cancels3d + d.cancels3d,
-            cancels7d: acc.cancels7d + d.cancels7d,
+            cancels7d: acc.cancels7d + (d.date <= resolvedCutoffKey ? d.cancels7d : 0),
         }),
         { starts3d: 0, starts7d: 0, cancels3d: 0, cancels7d: 0 },
     );
@@ -249,7 +271,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                     </div>
                     <div className="text-xs text-gray-400 leading-snug mt-2">
                         <div>
-                            Cohorts through {bufferDays}d ago (fully resolved).{' '}
+                            3-day line runs through {endBufferDays}d ago; 7-day line stops at {resolvedBufferDays}d ago (last fully resolved cohort).{' '}
                             {threshold === null
                                 ? 'Rate = any cancel ÷ trial starts on that day.'
                                 : `Rate = cancels within ${THRESHOLDS.find(t => t.value === threshold)?.label.replace('≤ ', '')} of trial start ÷ trial starts on that day.`}
@@ -345,7 +367,9 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                                                 <span className="text-sm font-medium text-indigo-600">7-day trial</span>
                                             </div>
                                             <span className="text-sm font-bold text-indigo-600">
-                                                {row.rate7d !== null ? `${row.rate7d.toFixed(1)}%` : '—'}
+                                                {row.rate7d !== null
+                                                    ? `${row.rate7d.toFixed(1)}%`
+                                                    : (typeof label === 'string' && label > resolvedCutoffKey ? 'unresolved' : '—')}
                                                 <span className="text-xs font-normal text-gray-500 ml-1">({row.cancels7d}/{row.starts7d})</span>
                                             </span>
                                         </div>
