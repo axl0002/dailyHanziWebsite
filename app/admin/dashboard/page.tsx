@@ -7,6 +7,7 @@ import ReferralChart from "../components/ReferralChart";
 import UserGrowthChart from "../components/UserGrowthChart";
 import HourlyGrowthChart from "../components/HourlyGrowthChart";
 import HourlyCancellationChart from "../components/HourlyCancellationChart";
+import CancellationByDayChart from "../components/CancellationByDayChart";
 import ReadingHoursChart from "../components/ReadingHoursChart";
 import HSKLevelChart from "../components/HSKLevelChart";
 import ReasonChart from "../components/ReasonChart";
@@ -98,6 +99,9 @@ export default function AdminDashboard() {
                 {/* Analytics Section */}
                 <div className="col-span-1 md:col-span-2">
                     <UserGrowthChart filter={filter} dateLabels={labels} onAddLabel={addLabel} onDeleteLabel={deleteLabel} />
+                </div>
+                <div className="col-span-1 md:col-span-2">
+                    <CancellationByDayChart dateLabels={labels} onAddLabel={addLabel} onDeleteLabel={deleteLabel} />
                 </div>
                 <div className="col-span-1 md:col-span-2">
                     <ReferralByDayChart filter={filter} dateLabels={labels} onAddLabel={addLabel} onDeleteLabel={deleteLabel} />
