@@ -53,6 +53,7 @@ export default function HourlyGrowthChart({ filter }: Props) {
                     .select('created_at, is_pro')
                     .eq('is_beta', false)
                     .gte('created_at', startHour.toISOString())
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

@@ -32,6 +32,7 @@ export default function TimezoneChart({ filter }: { filter?: 'all' | 'true' | 'f
                     .from('profiles')
                     .select('timezone, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

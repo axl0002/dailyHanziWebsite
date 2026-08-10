@@ -130,6 +130,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                         .gte('event_timestamp', gteISO)
                         .lt('event_timestamp', ltISO)
                         .order('event_timestamp', { ascending: false })
+                        .order('id', { ascending: true })
                         .range(from, to);
                     if (cancelReason) q = q.eq('cancel_reason', cancelReason);
                     const { data: batch, error } = await q;

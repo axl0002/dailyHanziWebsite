@@ -130,6 +130,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                         .eq('period_type', 'TRIAL')
                         .gte('event_timestamp', gteISO)
                         .order('event_timestamp', { ascending: false })
+                        .order('id', { ascending: true })
                         .range(from, to);
                     if (ltISO) q = q.lt('event_timestamp', ltISO);
                     if (extraEq?.cancel_reason) q = q.eq('cancel_reason', extraEq.cancel_reason);

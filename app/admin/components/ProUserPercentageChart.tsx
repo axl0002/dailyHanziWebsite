@@ -105,6 +105,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
                     .order('created_at', { ascending: true })
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 const { data: batch, error } = await query;

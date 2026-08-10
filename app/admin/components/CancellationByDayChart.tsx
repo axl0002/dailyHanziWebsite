@@ -129,6 +129,7 @@ export default function CancellationByDayChart({ dateLabels, onAddLabel, onDelet
                     .gte('event_timestamp', queryStart.toISOString())
                     .lte('event_timestamp', queryEnd.toISOString())
                     .order('event_timestamp', { ascending: true })
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (error) {

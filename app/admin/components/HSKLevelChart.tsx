@@ -32,6 +32,7 @@ export default function HSKLevelChart({ filter }: { filter?: 'all' | 'true' | 'f
                     .from('profiles')
                     .select('hsk_level, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

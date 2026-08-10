@@ -32,6 +32,7 @@ export default function CategoryChart({ filter }: { filter?: 'all' | 'true' | 'f
                     .from('profiles')
                     .select('selected_categories, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

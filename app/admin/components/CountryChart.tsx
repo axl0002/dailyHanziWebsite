@@ -43,6 +43,7 @@ export default function CountryChart({ filter }: { filter?: 'all' | 'true' | 'fa
                     .from('profiles')
                     .select('timezone, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

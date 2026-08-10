@@ -127,6 +127,7 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
                     .order('created_at', { ascending: true })
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

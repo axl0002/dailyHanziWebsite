@@ -31,6 +31,7 @@ export default function PlatformChart({ filter }: { filter?: 'all' | 'true' | 'f
                     .from('profiles')
                     .select('platform, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

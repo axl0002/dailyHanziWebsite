@@ -33,6 +33,7 @@ export default function ReadingHoursChart({ filter }: { filter?: 'all' | 'true' 
                     .from('profiles')
                     .select('reading_hours, is_pro')
                     .eq('is_beta', false)
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (filter === 'true') {

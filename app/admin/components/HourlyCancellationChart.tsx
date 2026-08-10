@@ -74,6 +74,7 @@ export default function HourlyCancellationChart() {
                     .eq('period_type', 'TRIAL')
                     .eq('cancel_reason', 'UNSUBSCRIBE')
                     .gte('event_timestamp', startHour.toISOString())
+                    .order('id', { ascending: true })
                     .range(from, to);
 
                 if (error) {
