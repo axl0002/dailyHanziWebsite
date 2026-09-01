@@ -36,6 +36,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     { key: 'id', label: 'User ID' },
 ];
 
+const EXPORT_HARD_CAP = 10000;
+
 function csvEscape(value: unknown): string {
     if (value === null || value === undefined) return '';
     const str = String(value);
@@ -242,6 +244,37 @@ export default function SuperUsersPage() {
     );
     const [exporting, setExporting] = useState(false);
     const [exportError, setExportError] = useState<string | null>(null);
+    const [exportCount, setExportCount] = useState<number | null>(null);
+    const [countLoading, setCountLoading] = useState(false);
+    const [exportLimit, setExportLimit] = useState<number | null>(null);
+
+    // When the export modal opens, resolve how many rows will be exported.
+    useEffect(() => {
+        if (!showExportModal) return;
+        if (mode === 'cancelled') {
+            const n = cancelledProfiles?.length ?? null;
+            setExportCount(n);
+            setExportLimit(prev => prev ?? (n === null ? null : Math.min(pageSize, n, EXPORT_HARD_CAP)));
+            return;
+        }
+        let cancelled = false;
+        setCountLoading(true);
+        (async () => {
+            const { count, error: qErr } = await supabase
+                .from('profiles')
+                .select('id', { count: 'exact', head: true })
+                .eq('is_beta', false);
+            if (cancelled) return;
+            if (qErr) setExportError(qErr.message);
+            else {
+                const n = count ?? 0;
+                setExportCount(n);
+                setExportLimit(prev => prev ?? Math.min(pageSize, n, EXPORT_HARD_CAP));
+            }
+            setCountLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [showExportModal, mode, cancelledProfiles]);
 
     const toggleColumn = (key: keyof SuperUser) => {
         setSelectedColumns(prev => {
@@ -265,17 +298,22 @@ export default function SuperUsersPage() {
         });
     }, [sortField, sortOrder]);
 
-    const fetchAllForExport = useCallback(async (): Promise<SuperUser[]> => {
+    const fetchAllForExport = useCallback(async (limit: number | null): Promise<SuperUser[]> => {
+        const effectiveLimit = Math.min(limit ?? EXPORT_HARD_CAP, EXPORT_HARD_CAP);
         if (mode === 'cancelled') {
             if (cancelledProfiles === null) throw new Error('Cancelled subscribers still loading');
-            return sortUsers(cancelledProfiles);
+            const sorted = sortUsers(cancelledProfiles);
+            return sorted.slice(0, effectiveLimit);
         }
         const batchSize = 1000;
         const collected: SuperUser[] = [];
         let batchIdx = 0;
         while (true) {
             const from = batchIdx * batchSize;
-            const to = from + batchSize - 1;
+            const remaining = effectiveLimit - collected.length;
+            if (remaining <= 0) break;
+            const take = Math.min(batchSize, remaining);
+            const to = from + take - 1;
             const { data, error: qErr } = await supabase
                 .from('profiles')
                 .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
@@ -285,9 +323,8 @@ export default function SuperUsersPage() {
             if (qErr) throw new Error(qErr.message);
             if (!data || data.length === 0) break;
             collected.push(...(data as SuperUser[]));
-            if (data.length < batchSize) break;
+            if (data.length < take) break;
             batchIdx++;
-            if (collected.length > 500000) break; // safety
         }
         return collected;
     }, [mode, cancelledProfiles, sortField, sortOrder, sortUsers]);
@@ -300,7 +337,7 @@ export default function SuperUsersPage() {
         setExporting(true);
         setExportError(null);
         try {
-            const rows = await fetchAllForExport();
+            const rows = await fetchAllForExport(exportLimit);
             const orderedCols = EXPORT_COLUMNS.filter(c => selectedColumns.has(c.key));
             const header = orderedCols.map(c => csvEscape(c.label)).join(',');
             const body = rows
@@ -389,8 +426,64 @@ export default function SuperUsersPage() {
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
                         <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>
                         <p className="text-sm text-gray-600 mt-1">
-                            Exporting <span className="font-medium">{mode === 'cancelled' ? 'cancelled subscribers' : 'all super users'}</span>, sorted by <span className="font-medium">{sortField}</span> ({sortOrder}). Choose columns:
+                            {mode === 'cancelled' ? 'Cancelled subscribers' : 'Super users'} matching filter:{' '}
+                            <span className="font-medium">
+                                {countLoading || exportCount === null ? '…' : exportCount.toLocaleString()}
+                            </span>
+                            . Sorted by <span className="font-medium">{sortField}</span> ({sortOrder}).
                         </p>
+                        <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700">Rows to export</label>
+                            <div className="mt-1 flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={Math.min(exportCount ?? EXPORT_HARD_CAP, EXPORT_HARD_CAP)}
+                                    value={exportLimit ?? ''}
+                                    onChange={e => {
+                                        const raw = e.target.value;
+                                        if (raw === '') { setExportLimit(null); return; }
+                                        const n = parseInt(raw, 10);
+                                        if (Number.isNaN(n) || n < 1) return;
+                                        const ceiling = Math.min(exportCount ?? EXPORT_HARD_CAP, EXPORT_HARD_CAP);
+                                        setExportLimit(Math.min(n, ceiling));
+                                    }}
+                                    className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:ring-1 focus:outline-none"
+                                />
+                                {exportCount !== null && (() => {
+                                    const maxAllowed = Math.min(exportCount, EXPORT_HARD_CAP);
+                                    return (
+                                        <button
+                                            type="button"
+                                            onClick={() => setExportLimit(maxAllowed)}
+                                            className="text-xs text-indigo-600 hover:text-indigo-800"
+                                        >
+                                            Max ({maxAllowed.toLocaleString()})
+                                        </button>
+                                    );
+                                })()}
+                                {[50, 500, 5000].map(n => (
+                                    (exportCount === null || n < exportCount) && n < EXPORT_HARD_CAP ? (
+                                        <button
+                                            key={n}
+                                            type="button"
+                                            onClick={() => setExportLimit(n)}
+                                            className="text-xs text-gray-500 hover:text-gray-700"
+                                        >
+                                            {n.toLocaleString()}
+                                        </button>
+                                    ) : null
+                                ))}
+                            </div>
+                            {exportCount !== null && exportCount > EXPORT_HARD_CAP && (
+                                <p className="mt-1 text-xs text-gray-500">
+                                    Capped at {EXPORT_HARD_CAP.toLocaleString()} rows per export — narrow the filter or resort to page through more.
+                                </p>
+                            )}
+                        </div>
+                        <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Columns</label>
+                        </div>
                         <div className="mt-4 grid grid-cols-2 gap-2">
                             {EXPORT_COLUMNS.map(col => (
                                 <label key={col.key} className="flex items-center gap-2 text-sm text-gray-700 py-1 px-2 rounded hover:bg-gray-50 cursor-pointer">
@@ -433,10 +526,14 @@ export default function SuperUsersPage() {
                             </button>
                             <button
                                 onClick={downloadCsv}
-                                disabled={exporting || selectedColumns.size === 0}
+                                disabled={exporting || selectedColumns.size === 0 || exportLimit === null || exportLimit < 1}
                                 className="px-4 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {exporting ? 'Exporting…' : 'Download'}
+                                {exporting
+                                    ? 'Exporting…'
+                                    : exportLimit !== null
+                                        ? `Download ${exportLimit.toLocaleString()} rows`
+                                        : 'Download'}
                             </button>
                         </div>
                     </div>
