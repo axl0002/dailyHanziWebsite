@@ -19,6 +19,44 @@ type SortField = 'streak_days' | 'longest_streak_days' | 'full_name' | 'created_
 type SortOrder = 'asc' | 'desc';
 type Mode = 'all' | 'cancelled';
 
+type ExportColumn = {
+    key: keyof SuperUser;
+    label: string;
+};
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+    { key: 'full_name', label: 'Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'streak_days', label: 'Streak Days' },
+    { key: 'longest_streak_days', label: 'Longest Streak' },
+    { key: 'is_pro', label: 'Status (Pro/Free)' },
+    { key: 'platform', label: 'Platform' },
+    { key: 'timezone', label: 'Timezone' },
+    { key: 'created_at', label: 'Joined' },
+    { key: 'id', label: 'User ID' },
+];
+
+function csvEscape(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    if (/[",\n\r]/.test(str)) {
+        return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+}
+
+function formatCsvValue(user: SuperUser, key: keyof SuperUser): string {
+    const v = user[key];
+    if (key === 'is_pro') return v ? 'Pro' : 'Free';
+    if (key === 'created_at' && typeof v === 'string') {
+        return new Date(v).toISOString();
+    }
+    if (key === 'longest_streak_days' && (v === null || v === undefined)) {
+        return String(user.streak_days);
+    }
+    return v === null || v === undefined ? '' : String(v);
+}
+
 export default function SuperUsersPage() {
     const [users, setUsers] = useState<SuperUser[]>([]);
     const [loading, setLoading] = useState(true);
@@ -197,6 +235,96 @@ export default function SuperUsersPage() {
 
     const [copied, setCopied] = useState(false);
 
+    // CSV export modal
+    const [showExportModal, setShowExportModal] = useState(false);
+    const [selectedColumns, setSelectedColumns] = useState<Set<keyof SuperUser>>(
+        () => new Set(EXPORT_COLUMNS.map(c => c.key)),
+    );
+    const [exporting, setExporting] = useState(false);
+    const [exportError, setExportError] = useState<string | null>(null);
+
+    const toggleColumn = (key: keyof SuperUser) => {
+        setSelectedColumns(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const sortUsers = useCallback((rows: SuperUser[]): SuperUser[] => {
+        const dir = sortOrder === 'asc' ? 1 : -1;
+        return [...rows].sort((a, b) => {
+            const va = a[sortField];
+            const vb = b[sortField];
+            if (va === vb) return 0;
+            if (va === null || va === undefined) return 1;
+            if (vb === null || vb === undefined) return -1;
+            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+            return String(va).localeCompare(String(vb)) * dir;
+        });
+    }, [sortField, sortOrder]);
+
+    const fetchAllForExport = useCallback(async (): Promise<SuperUser[]> => {
+        if (mode === 'cancelled') {
+            if (cancelledProfiles === null) throw new Error('Cancelled subscribers still loading');
+            return sortUsers(cancelledProfiles);
+        }
+        const batchSize = 1000;
+        const collected: SuperUser[] = [];
+        let batchIdx = 0;
+        while (true) {
+            const from = batchIdx * batchSize;
+            const to = from + batchSize - 1;
+            const { data, error: qErr } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                .eq('is_beta', false)
+                .order(sortField, { ascending: sortOrder === 'asc', nullsFirst: false })
+                .range(from, to);
+            if (qErr) throw new Error(qErr.message);
+            if (!data || data.length === 0) break;
+            collected.push(...(data as SuperUser[]));
+            if (data.length < batchSize) break;
+            batchIdx++;
+            if (collected.length > 500000) break; // safety
+        }
+        return collected;
+    }, [mode, cancelledProfiles, sortField, sortOrder, sortUsers]);
+
+    const downloadCsv = async () => {
+        if (selectedColumns.size === 0) {
+            setExportError('Select at least one column');
+            return;
+        }
+        setExporting(true);
+        setExportError(null);
+        try {
+            const rows = await fetchAllForExport();
+            const orderedCols = EXPORT_COLUMNS.filter(c => selectedColumns.has(c.key));
+            const header = orderedCols.map(c => csvEscape(c.label)).join(',');
+            const body = rows
+                .map(r => orderedCols.map(c => csvEscape(formatCsvValue(r, c.key))).join(','))
+                .join('\n');
+            const csv = `${header}\n${body}\n`;
+            const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            a.href = url;
+            a.download = `super-users-${mode}-${sortField}-${sortOrder}-${stamp}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setShowExportModal(false);
+        } catch (err: unknown) {
+            setExportError(err instanceof Error ? err.message : 'Failed to export CSV');
+        } finally {
+            setExporting(false);
+        }
+    };
+
     const copyEmails = () => {
         const emails = users
             .map(u => u.email)
@@ -246,8 +374,74 @@ export default function SuperUsersPage() {
                     >
                         {copied ? '✓ Copied!' : 'Copy Emails'}
                     </button>
+                    <button
+                        onClick={() => { setExportError(null); setShowExportModal(true); }}
+                        disabled={mode === 'cancelled' && cancelledProfiles === null}
+                        className="px-4 py-2 text-sm font-medium rounded-md border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Export CSV
+                    </button>
                 </div>
             </div>
+
+            {showExportModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !exporting && setShowExportModal(false)}>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Exporting <span className="font-medium">{mode === 'cancelled' ? 'cancelled subscribers' : 'all super users'}</span>, sorted by <span className="font-medium">{sortField}</span> ({sortOrder}). Choose columns:
+                        </p>
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                            {EXPORT_COLUMNS.map(col => (
+                                <label key={col.key} className="flex items-center gap-2 text-sm text-gray-700 py-1 px-2 rounded hover:bg-gray-50 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedColumns.has(col.key)}
+                                        onChange={() => toggleColumn(col.key)}
+                                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    {col.label}
+                                </label>
+                            ))}
+                        </div>
+                        <div className="mt-2 flex gap-3 text-xs">
+                            <button
+                                onClick={() => setSelectedColumns(new Set(EXPORT_COLUMNS.map(c => c.key)))}
+                                className="text-indigo-600 hover:text-indigo-800"
+                            >
+                                Select all
+                            </button>
+                            <button
+                                onClick={() => setSelectedColumns(new Set())}
+                                className="text-gray-500 hover:text-gray-700"
+                            >
+                                Clear
+                            </button>
+                        </div>
+                        {exportError && (
+                            <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                {exportError}
+                            </div>
+                        )}
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button
+                                onClick={() => setShowExportModal(false)}
+                                disabled={exporting}
+                                className="px-4 py-2 text-sm font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={downloadCsv}
+                                disabled={exporting || selectedColumns.size === 0}
+                                className="px-4 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {exporting ? 'Exporting…' : 'Download'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {error && (
                 <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
