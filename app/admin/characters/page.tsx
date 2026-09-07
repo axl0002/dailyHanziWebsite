@@ -22,6 +22,13 @@ export default function CharactersPage() {
     const [itemsPerPage] = useState(50);
     const [totalCount, setTotalCount] = useState(0);
 
+    // Filters
+    const [categoryFilter, setCategoryFilter] = useState<string>("");
+    const [levelFilter, setLevelFilter] = useState<string>("");
+    const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
+    const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+    const [levelOptions, setLevelOptions] = useState<string[]>([]);
+
     // Sorting
     const [sortField, setSortField] = useState<SortField>('id');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -55,6 +62,20 @@ export default function CharactersPage() {
                 query = query.ilike('character', `%${searchTerm}%`);
             }
 
+            if (categoryFilter) {
+                query = query.eq('category', categoryFilter);
+            }
+
+            if (levelFilter) {
+                query = query.eq('hsk_level', levelFilter);
+            }
+
+            if (visibilityFilter === 'visible') {
+                query = query.eq('visible', true);
+            } else if (visibilityFilter === 'hidden') {
+                query = query.eq('visible', false);
+            }
+
             if (sortField) {
                 query = query.order(sortField, { ascending: sortOrder === 'asc' });
             }
@@ -74,11 +95,31 @@ export default function CharactersPage() {
         } finally {
             setLoading(false);
         }
-    }, [searchTerm, sortField, sortOrder, currentPage, itemsPerPage]);
+    }, [searchTerm, categoryFilter, levelFilter, visibilityFilter, sortField, sortOrder, currentPage, itemsPerPage]);
 
     useEffect(() => {
         fetchCharacters();
     }, [fetchCharacters]);
+
+    // Fetch filter options once on mount
+    useEffect(() => {
+        const fetchFilterOptions = async () => {
+            const { data } = await supabase
+                .from("characters")
+                .select("category, hsk_level")
+                .limit(50000);
+            if (!data) return;
+            const cats = Array.from(
+                new Set(data.map(r => r.category).filter((v): v is string => !!v))
+            ).sort();
+            const lvls = Array.from(
+                new Set(data.map(r => r.hsk_level).filter((v): v is number => v != null))
+            ).sort((a, b) => a - b).map(String);
+            setCategoryOptions(cats);
+            setLevelOptions(lvls);
+        };
+        fetchFilterOptions();
+    }, []);
 
     // ... (rest of the file)
 
@@ -114,6 +155,29 @@ export default function CharactersPage() {
     const handleSave = () => {
         fetchCharacters();
         handleCloseModal();
+    };
+
+    const handleToggleVisibility = async (char: CharacterRow) => {
+        const newVisible = !char.visible;
+        try {
+            const { error, data } = await supabase
+                .from("characters")
+                .update({ visible: newVisible })
+                .eq("id", char.id)
+                .select();
+
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                alert("Failed to update visibility. You might not have permission (RLS Policy).");
+                return;
+            }
+            setCharacters(prev =>
+                prev.map(c => (c.id === char.id ? { ...c, visible: newVisible } : c))
+            );
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "Unknown error";
+            alert("Error updating visibility: " + message);
+        }
     };
 
     const handleDelete = async (char: Character) => {
@@ -199,6 +263,48 @@ export default function CharactersPage() {
                         </button>
                     ))}
                 </div>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 items-center mb-6">
+                <span className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Filter:</span>
+                <select
+                    value={categoryFilter}
+                    onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
+                    className="border p-2 rounded text-sm bg-white"
+                >
+                    <option value="">All categories</option>
+                    {categoryOptions.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                    ))}
+                </select>
+                <select
+                    value={levelFilter}
+                    onChange={(e) => { setLevelFilter(e.target.value); setCurrentPage(1); }}
+                    className="border p-2 rounded text-sm bg-white"
+                >
+                    <option value="">All HSK levels</option>
+                    {levelOptions.map(l => (
+                        <option key={l} value={l}>HSK {l}</option>
+                    ))}
+                </select>
+                <select
+                    value={visibilityFilter}
+                    onChange={(e) => { setVisibilityFilter(e.target.value as 'all' | 'visible' | 'hidden'); setCurrentPage(1); }}
+                    className="border p-2 rounded text-sm bg-white"
+                >
+                    <option value="all">All visibility</option>
+                    <option value="visible">Visible only</option>
+                    <option value="hidden">Hidden only</option>
+                </select>
+                {(categoryFilter || levelFilter || visibilityFilter !== 'all') && (
+                    <button
+                        onClick={() => { setCategoryFilter(""); setLevelFilter(""); setVisibilityFilter('all'); setCurrentPage(1); }}
+                        className="text-xs text-gray-500 hover:text-gray-800 underline"
+                    >
+                        Clear
+                    </button>
+                )}
             </div>
 
             {/* Table */}
@@ -309,6 +415,12 @@ export default function CharactersPage() {
                                             className="text-indigo-600 hover:text-indigo-900 mr-4"
                                         >
                                             Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleToggleVisibility(char)}
+                                            className={`${char.visible ? "text-yellow-600 hover:text-yellow-900" : "text-green-600 hover:text-green-900"} mr-4`}
+                                        >
+                                            {char.visible ? "Hide" : "Show"}
                                         </button>
                                         <button
                                             onClick={() => handleDelete(char)}
