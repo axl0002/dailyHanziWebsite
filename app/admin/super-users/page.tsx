@@ -143,7 +143,12 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 ];
 
 const EXPORT_HARD_CAP = 50000;
-const SEEN_RPC_MAX_ROWS = 5000;
+// Cap the seen-count RPC at the same 50K ceiling as the CSV export. The
+// underlying aggregation over user_seen_characters takes ~5s regardless of
+// LIMIT (measured on the live DB) and fits comfortably under the
+// authenticated role's 8s statement_timeout. Payload at 50K is ~38MB —
+// heavier than 5K but still a one-shot load cached for the whole session.
+const SEEN_RPC_MAX_ROWS = 50000;
 
 // Column list requested from Supabase for the non-seen paths. Kept as one string
 // so both the paginated fetch and the cancelled/export fetches use exactly the
