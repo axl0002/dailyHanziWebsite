@@ -301,7 +301,9 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [mode, cancelledIds, cancelledProfiles]);
 
-    // Kick off the seen-count RPC on demand.
+    // Kick off the seen-count RPC on demand. The RPC returns a single jsonb
+    // array (rather than SETOF ROW) to bypass PostgREST's db-max-rows cap of
+    // 1000 on this project, so we parse the array here.
     useEffect(() => {
         if (sortField !== 'seen_count') return;
         if (seenSorted !== null) return;
@@ -314,7 +316,10 @@ export default function SuperUsersPage() {
                     max_rows: SEEN_RPC_MAX_ROWS,
                 });
                 if (rpcErr) throw new Error(rpcErr.message);
-                const rows: SuperUser[] = (data ?? []).map((r: SuperUser & { seen_count: number | string | null }) => ({
+                const raw: (SuperUser & { seen_count: number | string | null })[] = Array.isArray(data)
+                    ? (data as (SuperUser & { seen_count: number | string | null })[])
+                    : [];
+                const rows: SuperUser[] = raw.map(r => ({
                     ...r,
                     seen_count: typeof r.seen_count === 'string' ? parseInt(r.seen_count, 10) : r.seen_count ?? 0,
                 }));
