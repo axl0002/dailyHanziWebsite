@@ -6,6 +6,12 @@
 -- SECURITY DEFINER + is_staff() gate — regular authenticated users get an
 -- exception if they call this. profiles RLS would already block them, but the
 -- explicit gate makes the intent obvious.
+--
+-- Returns the same shape of columns the admin's toolbar filters + columns
+-- panel needs (hsk_level, notifications_enabled, daily_goal, survey_responses
+-- keys), so the client can filter the cached array without re-querying.
+
+drop function if exists public.top_super_users_by_seen(int);
 
 create or replace function public.top_super_users_by_seen(max_rows int default 5000)
 returns table (
@@ -18,6 +24,10 @@ returns table (
     platform text,
     timezone text,
     created_at timestamptz,
+    hsk_level integer,
+    notifications_enabled boolean,
+    daily_goal integer,
+    survey_responses jsonb,
     seen_count bigint
 )
 language plpgsql
@@ -40,6 +50,10 @@ begin
             p.platform,
             p.timezone,
             p.created_at,
+            p.hsk_level,
+            p.notifications_enabled,
+            p.daily_goal,
+            p.survey_responses,
             coalesce(sc.n, 0)::bigint as seen_count
         from public.profiles p
         left join (

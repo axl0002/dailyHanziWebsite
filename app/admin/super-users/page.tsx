@@ -1,7 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+
+type SurveyResponses = {
+    reason?: string;
+    reading_hours?: string;
+    referral_source?: string;
+    goal?: number | string;
+    level?: number | string;
+    categories?: string[];
+} | null;
 
 type SuperUser = {
     id: string;
@@ -13,15 +22,104 @@ type SuperUser = {
     platform: string | null;
     timezone: string | null;
     created_at: string;
+    hsk_level: number | null;
+    notifications_enabled: boolean | null;
+    daily_goal: number | null;
+    survey_responses: SurveyResponses;
     seen_count?: number | null;
 };
 
-type SortField = 'streak_days' | 'longest_streak_days' | 'full_name' | 'created_at' | 'seen_count';
+type SortField =
+    | 'streak_days'
+    | 'longest_streak_days'
+    | 'full_name'
+    | 'created_at'
+    | 'daily_goal'
+    | 'hsk_level'
+    | 'seen_count';
 type SortOrder = 'asc' | 'desc';
 type Mode = 'all' | 'cancelled';
 
+type Filters = {
+    hskLevel: string;                    // '' = any
+    pro: 'all' | 'pro' | 'free';
+    notifications: 'all' | 'on' | 'off';
+    platform: string;                    // '' = any
+    surveyReason: string;                // '' = any
+    surveyReadingHours: string;          // '' = any
+    timezoneContains: string;            // '' = any
+    minStreak: string;                   // '' = any (numeric input as string)
+};
+
+const DEFAULT_FILTERS: Filters = {
+    hskLevel: '',
+    pro: 'all',
+    notifications: 'all',
+    platform: '',
+    surveyReason: '',
+    surveyReadingHours: '',
+    timezoneContains: '',
+    minStreak: '',
+};
+
+const SORT_OPTIONS: { value: SortField; label: string }[] = [
+    { value: 'streak_days', label: 'Streak Days' },
+    { value: 'longest_streak_days', label: 'Longest Streak' },
+    { value: 'seen_count', label: 'Characters Seen' },
+    { value: 'daily_goal', label: 'Daily Goal' },
+    { value: 'created_at', label: 'Joined' },
+    { value: 'full_name', label: 'Name' },
+    { value: 'hsk_level', label: 'HSK Level' },
+];
+
+// Discovered by querying survey_responses on the live DB. Keeping the option
+// list explicit rather than fetching dynamically — the set is stable and small.
+const REASON_OPTIONS = ['Education', 'Personal Interest', 'Connect with people', 'Travel', 'Business', 'Heritage', 'Other'];
+const READING_HOURS_OPTIONS = ['< 30 mins', '< 1 hour', '1-3 hours', '3-7 hours', '7+ hours'];
+const PLATFORM_OPTIONS = ['ios', 'android'];
+const HSK_LEVELS = ['1', '2', '3', '4', '5', '6'];
+
+type ColumnKey =
+    | 'name'
+    | 'email'
+    | 'streak_days'
+    | 'longest_streak_days'
+    | 'seen_count'
+    | 'hsk_level'
+    | 'daily_goal'
+    | 'notifications'
+    | 'timezone'
+    | 'reading_hours'
+    | 'reason'
+    | 'platform'
+    | 'is_pro'
+    | 'created_at';
+
+type ColumnDef = {
+    key: ColumnKey;
+    label: string;
+    defaultVisible: boolean;
+};
+
+const COLUMN_DEFS: ColumnDef[] = [
+    { key: 'name', label: 'Name', defaultVisible: true },
+    { key: 'email', label: 'Email', defaultVisible: true },
+    { key: 'streak_days', label: 'Streak', defaultVisible: true },
+    { key: 'longest_streak_days', label: 'Longest', defaultVisible: true },
+    { key: 'seen_count', label: 'Seen', defaultVisible: true },
+    { key: 'hsk_level', label: 'HSK', defaultVisible: true },
+    { key: 'daily_goal', label: 'Goal', defaultVisible: false },
+    { key: 'notifications', label: 'Notifs', defaultVisible: false },
+    { key: 'timezone', label: 'Timezone', defaultVisible: true },
+    { key: 'reading_hours', label: 'Reading Hrs', defaultVisible: false },
+    { key: 'reason', label: 'Reason', defaultVisible: false },
+    { key: 'platform', label: 'Platform', defaultVisible: false },
+    { key: 'is_pro', label: 'Status', defaultVisible: true },
+    { key: 'created_at', label: 'Joined', defaultVisible: false },
+];
+
 type ExportColumn = {
-    key: keyof SuperUser;
+    key: string;
     label: string;
 };
 
@@ -31,19 +129,26 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     { key: 'streak_days', label: 'Streak Days' },
     { key: 'longest_streak_days', label: 'Longest Streak' },
     { key: 'seen_count', label: 'Characters Seen' },
+    { key: 'hsk_level', label: 'HSK Level' },
+    { key: 'daily_goal', label: 'Daily Goal' },
+    { key: 'notifications_enabled', label: 'Notifications' },
+    { key: 'timezone', label: 'Timezone' },
+    { key: 'reading_hours', label: 'Reading Hours (survey)' },
+    { key: 'reason', label: 'Reason (survey)' },
+    { key: 'referral_source', label: 'Referral (survey)' },
     { key: 'is_pro', label: 'Status (Pro/Free)' },
     { key: 'platform', label: 'Platform' },
-    { key: 'timezone', label: 'Timezone' },
     { key: 'created_at', label: 'Joined' },
     { key: 'id', label: 'User ID' },
 ];
 
 const EXPORT_HARD_CAP = 50000;
-
-// Ceiling on how many rows the seen-count RPC returns. Beyond this the
-// aggregation gets slow and the payload heavy; 5000 covers the "who saw the
-// most characters" question comfortably.
 const SEEN_RPC_MAX_ROWS = 5000;
+
+// Column list requested from Supabase for the non-seen paths. Kept as one string
+// so both the paginated fetch and the cancelled/export fetches use exactly the
+// same shape.
+const PROFILE_SELECT = 'id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at, hsk_level, notifications_enabled, daily_goal, survey_responses';
 
 function csvEscape(value: unknown): string {
     if (value === null || value === undefined) return '';
@@ -54,18 +159,33 @@ function csvEscape(value: unknown): string {
     return str;
 }
 
-function formatCsvValue(user: SuperUser, key: keyof SuperUser): string {
-    const v = user[key];
-    if (key === 'is_pro') return v ? 'Pro' : 'Free';
-    if (key === 'created_at' && typeof v === 'string') {
-        return new Date(v).toISOString();
+function surveyValue(user: SuperUser, key: keyof NonNullable<SurveyResponses>): string {
+    const sr = user.survey_responses;
+    if (!sr) return '';
+    const v = sr[key];
+    if (v === null || v === undefined) return '';
+    if (Array.isArray(v)) return v.join('; ');
+    return String(v);
+}
+
+function formatCsvValue(user: SuperUser, key: string): string {
+    if (key === 'is_pro') return user.is_pro ? 'Pro' : 'Free';
+    if (key === 'created_at') return new Date(user.created_at).toISOString();
+    if (key === 'longest_streak_days') {
+        return String(user.longest_streak_days ?? user.streak_days);
     }
-    if (key === 'longest_streak_days' && (v === null || v === undefined)) {
-        return String(user.streak_days);
+    if (key === 'notifications_enabled') {
+        return user.notifications_enabled === null || user.notifications_enabled === undefined
+            ? ''
+            : (user.notifications_enabled ? 'on' : 'off');
     }
-    if (key === 'seen_count' && (v === null || v === undefined)) {
-        return '';
+    if (key === 'reading_hours') return surveyValue(user, 'reading_hours');
+    if (key === 'reason') return surveyValue(user, 'reason');
+    if (key === 'referral_source') return surveyValue(user, 'referral_source');
+    if (key === 'seen_count') {
+        return user.seen_count === null || user.seen_count === undefined ? '' : String(user.seen_count);
     }
+    const v = (user as unknown as Record<string, unknown>)[key];
     return v === null || v === undefined ? '' : String(v);
 }
 
@@ -78,21 +198,24 @@ export default function SuperUsersPage() {
     const [mode, setMode] = useState<Mode>('all');
     const [cancelledIds, setCancelledIds] = useState<string[] | null>(null);
     const [cancelledLoading, setCancelledLoading] = useState(false);
-    // In cancelled mode we fetch matching profiles in chunks (to keep the
-    // .in('id', […]) URL under proxy limits), cache the full set, then sort
-    // and paginate client-side.
     const [cancelledProfiles, setCancelledProfiles] = useState<SuperUser[] | null>(null);
 
-    // Cached result of top_super_users_by_seen(SEEN_RPC_MAX_ROWS). Aggregating
-    // user_seen_characters is a ~3-6s query, so we run it once per session and
-    // paginate/sort in memory afterwards. Also serves as the seen_count lookup
-    // for the Seen column when the user is on any other sort field.
+    // Cached result of top_super_users_by_seen(SEEN_RPC_MAX_ROWS).
     const [seenSorted, setSeenSorted] = useState<SuperUser[] | null>(null);
     const [seenLoading, setSeenLoading] = useState(false);
 
     // Sorting
     const [sortField, setSortField] = useState<SortField>('streak_days');
     const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+    // Filters
+    const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+
+    // Column visibility
+    const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(
+        () => new Set(COLUMN_DEFS.filter(c => c.defaultVisible).map(c => c.key)),
+    );
+    const [showColumnPicker, setShowColumnPicker] = useState(false);
 
     // Pagination
     const [page, setPage] = useState(0);
@@ -125,7 +248,7 @@ export default function SuperUsersPage() {
                     }
                     if (data.length < size) break;
                     pageIdx++;
-                    if (ids.size > 100000) break; // safety
+                    if (ids.size > 100000) break;
                 }
                 if (!cancelled) setCancelledIds(Array.from(ids));
             } catch (err: unknown) {
@@ -137,8 +260,7 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [mode, cancelledIds]);
 
-    // Load all cancelled profiles once (chunked to avoid URL length blowup),
-    // then sort + paginate in memory as sort/page changes.
+    // Load all cancelled profiles once (chunked to avoid URL length blowup).
     useEffect(() => {
         if (mode !== 'cancelled' || cancelledIds === null || cancelledProfiles !== null) return;
         let cancelled = false;
@@ -159,7 +281,7 @@ export default function SuperUsersPage() {
                     chunks.map((chunk) =>
                         supabase
                             .from('profiles')
-                            .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                            .select(PROFILE_SELECT)
                             .eq('is_beta', false)
                             .in('id', chunk),
                     ),
@@ -167,7 +289,7 @@ export default function SuperUsersPage() {
                 const merged: SuperUser[] = [];
                 for (const r of results) {
                     if (r.error) throw new Error(r.error.message);
-                    if (r.data) merged.push(...(r.data as SuperUser[]));
+                    if (r.data) merged.push(...(r.data as unknown as SuperUser[]));
                 }
                 if (!cancelled) setCancelledProfiles(merged);
             } catch (err: unknown) {
@@ -179,8 +301,7 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [mode, cancelledIds, cancelledProfiles]);
 
-    // Kick off the seen-count RPC the first time the user selects that sort
-    // (or opens an export that needs it). Cached for the rest of the session.
+    // Kick off the seen-count RPC on demand.
     useEffect(() => {
         if (sortField !== 'seen_count') return;
         if (seenSorted !== null) return;
@@ -207,7 +328,7 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [sortField, seenSorted]);
 
-    // Attach seen_count to rows once the cache is warm, regardless of sort field.
+    // Once cache is warm, backfill seen_count on rows served by other sorts.
     const enrichWithSeen = useCallback((rows: SuperUser[]): SuperUser[] => {
         if (!seenSorted) return rows;
         const counts = new Map<string, number>();
@@ -217,19 +338,61 @@ export default function SuperUsersPage() {
         return rows.map(r => ({ ...r, seen_count: counts.get(r.id) ?? r.seen_count ?? null }));
     }, [seenSorted]);
 
+    // Apply the filter object as .eq/.ilike/.gte chains on a Supabase query.
+    // Kept as a local helper so both fetchUsers and fetchAllForExport share it.
+    type QueryLike = {
+        eq: (col: string, val: unknown) => QueryLike;
+        ilike: (col: string, val: string) => QueryLike;
+        gte: (col: string, val: unknown) => QueryLike;
+        filter: (col: string, op: string, val: unknown) => QueryLike;
+    };
+    const applyServerFilters = useCallback(<Q extends QueryLike>(q: Q): Q => {
+        let out: QueryLike = q;
+        if (filters.hskLevel) out = out.eq('hsk_level', parseInt(filters.hskLevel, 10));
+        if (filters.pro === 'pro') out = out.eq('is_pro', true);
+        else if (filters.pro === 'free') out = out.eq('is_pro', false);
+        if (filters.notifications === 'on') out = out.eq('notifications_enabled', true);
+        else if (filters.notifications === 'off') out = out.eq('notifications_enabled', false);
+        if (filters.platform) out = out.eq('platform', filters.platform);
+        if (filters.surveyReason) out = out.eq('survey_responses->>reason', filters.surveyReason);
+        if (filters.surveyReadingHours) out = out.eq('survey_responses->>reading_hours', filters.surveyReadingHours);
+        if (filters.timezoneContains) out = out.ilike('timezone', `%${filters.timezoneContains}%`);
+        if (filters.minStreak) {
+            const n = parseInt(filters.minStreak, 10);
+            if (!Number.isNaN(n)) out = out.gte('streak_days', n);
+        }
+        return out as Q;
+    }, [filters]);
+
+    // Same filter set applied to already-fetched rows (cancelled / seen modes).
+    const passesClientFilters = useCallback((u: SuperUser): boolean => {
+        if (filters.hskLevel && String(u.hsk_level ?? '') !== filters.hskLevel) return false;
+        if (filters.pro === 'pro' && !u.is_pro) return false;
+        if (filters.pro === 'free' && u.is_pro) return false;
+        if (filters.notifications === 'on' && !u.notifications_enabled) return false;
+        if (filters.notifications === 'off' && u.notifications_enabled) return false;
+        if (filters.platform && u.platform !== filters.platform) return false;
+        if (filters.surveyReason && (u.survey_responses?.reason ?? '') !== filters.surveyReason) return false;
+        if (filters.surveyReadingHours && (u.survey_responses?.reading_hours ?? '') !== filters.surveyReadingHours) return false;
+        if (filters.timezoneContains && !(u.timezone ?? '').toLowerCase().includes(filters.timezoneContains.toLowerCase())) return false;
+        if (filters.minStreak) {
+            const n = parseInt(filters.minStreak, 10);
+            if (!Number.isNaN(n) && u.streak_days < n) return false;
+        }
+        return true;
+    }, [filters]);
+
     const fetchUsers = useCallback(async () => {
-        // seen_count sort is served entirely from the cached RPC result,
-        // for both 'all' and 'cancelled' modes.
+        // seen_count sort is served from the cached RPC result.
         if (sortField === 'seen_count') {
-            if (seenSorted === null) return; // effect above is loading
-            let source: SuperUser[];
+            if (seenSorted === null) return;
+            let source: SuperUser[] = seenSorted;
             if (mode === 'cancelled') {
                 if (cancelledIds === null) return;
                 const idSet = new Set(cancelledIds);
-                source = seenSorted.filter(u => idSet.has(u.id));
-            } else {
-                source = seenSorted;
+                source = source.filter(u => idSet.has(u.id));
             }
+            source = source.filter(passesClientFilters);
             const sorted = [...source].sort((a, b) => {
                 const va = a.seen_count ?? 0;
                 const vb = b.seen_count ?? 0;
@@ -243,9 +406,9 @@ export default function SuperUsersPage() {
         }
 
         if (mode === 'cancelled') {
-            // Wait until the cached list has arrived.
             if (cancelledProfiles === null) return;
-            const sorted = [...cancelledProfiles].sort((a, b) => {
+            const filtered = cancelledProfiles.filter(passesClientFilters);
+            const sorted = [...filtered].sort((a, b) => {
                 const dir = sortOrder === 'asc' ? 1 : -1;
                 const va = a[sortField as Exclude<SortField, 'seen_count'>];
                 const vb = b[sortField as Exclude<SortField, 'seen_count'>];
@@ -268,17 +431,15 @@ export default function SuperUsersPage() {
         try {
             const from = page * pageSize;
             const to = from + pageSize - 1;
-
-            const { data, error: queryError } = await supabase
+            const base = supabase
                 .from('profiles')
-                .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                .select(PROFILE_SELECT)
                 .eq('is_beta', false)
                 .order(sortField as Exclude<SortField, 'seen_count'>, { ascending: sortOrder === 'asc', nullsFirst: false })
                 .range(from, to);
-
+            const { data, error: queryError } = await applyServerFilters(base as unknown as QueryLike) as unknown as { data: SuperUser[] | null; error: { message: string } | null };
             if (queryError) throw new Error(queryError.message);
-
-            setUsers(enrichWithSeen(data || []));
+            setUsers(enrichWithSeen((data ?? []) as SuperUser[]));
             setHasMore((data?.length || 0) === pageSize);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
@@ -286,39 +447,22 @@ export default function SuperUsersPage() {
         } finally {
             setLoading(false);
         }
-    }, [sortField, sortOrder, page, mode, cancelledProfiles, cancelledIds, seenSorted, enrichWithSeen]);
+    }, [sortField, sortOrder, page, mode, cancelledProfiles, cancelledIds, seenSorted, enrichWithSeen, passesClientFilters, applyServerFilters]);
 
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);
 
-    const handleSort = (field: SortField) => {
-        if (sortField === field) {
-            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-        } else {
-            setSortField(field);
-            setSortOrder(field === 'full_name' ? 'asc' : 'desc');
-        }
+    // Reset pagination whenever filters/sort/mode change.
+    useEffect(() => {
         setPage(0);
-    };
-
-    const switchMode = (next: Mode) => {
-        if (next === mode) return;
-        setMode(next);
-        setPage(0);
-        setUsers([]);
-    };
-
-    const sortIndicator = (field: SortField) => {
-        if (sortField !== field) return '';
-        return sortOrder === 'asc' ? ' ↑' : ' ↓';
-    };
+    }, [filters, sortField, sortOrder, mode]);
 
     const [copied, setCopied] = useState(false);
 
-    // CSV export modal
+    // CSV export
     const [showExportModal, setShowExportModal] = useState(false);
-    const [selectedColumns, setSelectedColumns] = useState<Set<keyof SuperUser>>(
+    const [selectedExportColumns, setSelectedExportColumns] = useState<Set<string>>(
         () => new Set(EXPORT_COLUMNS.map(c => c.key)),
     );
     const [exporting, setExporting] = useState(false);
@@ -328,29 +472,31 @@ export default function SuperUsersPage() {
     const [exportLimit, setExportLimit] = useState<number | null>(null);
     const [exportOffset, setExportOffset] = useState<number>(0);
 
-    // When the export modal opens, resolve how many rows will be exported.
+    // Resolve export row count when the modal opens.
     useEffect(() => {
         if (!showExportModal) return;
         if (sortField === 'seen_count') {
-            // The seen-count RPC caps at SEEN_RPC_MAX_ROWS, so that's the pool.
-            const n = seenSorted?.length ?? null;
+            const filtered = (seenSorted ?? []).filter(passesClientFilters);
+            const n = filtered.length;
             setExportCount(n);
-            setExportLimit(prev => prev ?? (n === null ? null : Math.min(pageSize, n, EXPORT_HARD_CAP)));
+            setExportLimit(prev => prev ?? Math.min(pageSize, n, EXPORT_HARD_CAP));
             return;
         }
         if (mode === 'cancelled') {
-            const n = cancelledProfiles?.length ?? null;
+            const filtered = (cancelledProfiles ?? []).filter(passesClientFilters);
+            const n = filtered.length;
             setExportCount(n);
-            setExportLimit(prev => prev ?? (n === null ? null : Math.min(pageSize, n, EXPORT_HARD_CAP)));
+            setExportLimit(prev => prev ?? Math.min(pageSize, n, EXPORT_HARD_CAP));
             return;
         }
         let cancelled = false;
         setCountLoading(true);
         (async () => {
-            const { count, error: qErr } = await supabase
+            const base = supabase
                 .from('profiles')
                 .select('id', { count: 'exact', head: true })
                 .eq('is_beta', false);
+            const { count, error: qErr } = await applyServerFilters(base as unknown as QueryLike) as unknown as { count: number | null; error: { message: string } | null };
             if (cancelled) return;
             if (qErr) setExportError(qErr.message);
             else {
@@ -361,10 +507,10 @@ export default function SuperUsersPage() {
             setCountLoading(false);
         })();
         return () => { cancelled = true; };
-    }, [showExportModal, mode, cancelledProfiles, sortField, seenSorted]);
+    }, [showExportModal, mode, cancelledProfiles, sortField, seenSorted, passesClientFilters, applyServerFilters]);
 
-    const toggleColumn = (key: keyof SuperUser) => {
-        setSelectedColumns(prev => {
+    const toggleExportColumn = (key: string) => {
+        setSelectedExportColumns(prev => {
             const next = new Set(prev);
             if (next.has(key)) next.delete(key);
             else next.add(key);
@@ -372,11 +518,11 @@ export default function SuperUsersPage() {
         });
     };
 
-    const sortUsers = useCallback((rows: SuperUser[]): SuperUser[] => {
+    const sortUsersInMemory = useCallback((rows: SuperUser[]): SuperUser[] => {
         const dir = sortOrder === 'asc' ? 1 : -1;
         return [...rows].sort((a, b) => {
-            const va = a[sortField];
-            const vb = b[sortField];
+            const va = a[sortField as keyof SuperUser];
+            const vb = b[sortField as keyof SuperUser];
             if (va === vb) return 0;
             if (va === null || va === undefined) return 1;
             if (vb === null || vb === undefined) return -1;
@@ -389,7 +535,6 @@ export default function SuperUsersPage() {
         const effectiveLimit = Math.min(limit ?? EXPORT_HARD_CAP, EXPORT_HARD_CAP);
         const effectiveOffset = Math.max(offset, 0);
 
-        // seen_count is served from the cached RPC result (with counts already inlined).
         if (sortField === 'seen_count') {
             if (seenSorted === null) throw new Error('Seen-count data still loading');
             let source = seenSorted;
@@ -398,6 +543,7 @@ export default function SuperUsersPage() {
                 const idSet = new Set(cancelledIds);
                 source = seenSorted.filter(u => idSet.has(u.id));
             }
+            source = source.filter(passesClientFilters);
             const sorted = [...source].sort((a, b) => {
                 const va = a.seen_count ?? 0;
                 const vb = b.seen_count ?? 0;
@@ -408,7 +554,8 @@ export default function SuperUsersPage() {
 
         if (mode === 'cancelled') {
             if (cancelledProfiles === null) throw new Error('Cancelled subscribers still loading');
-            const sorted = sortUsers(cancelledProfiles);
+            const filtered = cancelledProfiles.filter(passesClientFilters);
+            const sorted = sortUsersInMemory(filtered);
             const slice = sorted.slice(effectiveOffset, effectiveOffset + effectiveLimit);
             return enrichWithSeen(slice);
         }
@@ -422,12 +569,13 @@ export default function SuperUsersPage() {
             if (remaining <= 0) break;
             const take = Math.min(batchSize, remaining);
             const to = from + take - 1;
-            const { data, error: qErr } = await supabase
+            const base = supabase
                 .from('profiles')
-                .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
+                .select(PROFILE_SELECT)
                 .eq('is_beta', false)
                 .order(sortField as Exclude<SortField, 'seen_count'>, { ascending: sortOrder === 'asc', nullsFirst: false })
                 .range(from, to);
+            const { data, error: qErr } = await applyServerFilters(base as unknown as QueryLike) as unknown as { data: SuperUser[] | null; error: { message: string } | null };
             if (qErr) throw new Error(qErr.message);
             if (!data || data.length === 0) break;
             collected.push(...(data as SuperUser[]));
@@ -435,10 +583,10 @@ export default function SuperUsersPage() {
             batchIdx++;
         }
         return enrichWithSeen(collected);
-    }, [mode, cancelledProfiles, cancelledIds, sortField, sortOrder, sortUsers, seenSorted, enrichWithSeen]);
+    }, [mode, cancelledProfiles, cancelledIds, sortField, sortOrder, sortUsersInMemory, seenSorted, enrichWithSeen, passesClientFilters, applyServerFilters]);
 
     const downloadCsv = async () => {
-        if (selectedColumns.size === 0) {
+        if (selectedExportColumns.size === 0) {
             setExportError('Select at least one column');
             return;
         }
@@ -446,7 +594,7 @@ export default function SuperUsersPage() {
         setExportError(null);
         try {
             const rows = await fetchAllForExport(exportLimit, exportOffset);
-            const orderedCols = EXPORT_COLUMNS.filter(c => selectedColumns.has(c.key));
+            const orderedCols = EXPORT_COLUMNS.filter(c => selectedExportColumns.has(c.key));
             const header = orderedCols.map(c => csvEscape(c.label)).join(',');
             const body = rows
                 .map(r => orderedCols.map(c => csvEscape(formatCsvValue(r, c.key))).join(','))
@@ -481,20 +629,57 @@ export default function SuperUsersPage() {
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const switchMode = (next: Mode) => {
+        if (next === mode) return;
+        setMode(next);
+        setUsers([]);
+    };
+
+    const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+        setFilters(prev => ({ ...prev, [key]: value }));
+    };
+
+    const activeFilterCount = useMemo(() => {
+        let n = 0;
+        if (filters.hskLevel) n++;
+        if (filters.pro !== 'all') n++;
+        if (filters.notifications !== 'all') n++;
+        if (filters.platform) n++;
+        if (filters.surveyReason) n++;
+        if (filters.surveyReadingHours) n++;
+        if (filters.timezoneContains) n++;
+        if (filters.minStreak) n++;
+        return n;
+    }, [filters]);
+
     const isBusy = loading
         || (mode === 'cancelled' && cancelledLoading && cancelledIds === null)
         || (mode === 'cancelled' && cancelledIds !== null && cancelledProfiles === null)
         || (sortField === 'seen_count' && seenLoading);
 
+    const toggleColumn = (key: ColumnKey) => {
+        setVisibleColumns(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const visibleColumnList = useMemo(
+        () => COLUMN_DEFS.filter(c => visibleColumns.has(c.key)),
+        [visibleColumns],
+    );
+
     return (
         <div>
-            <div className="mb-6 flex items-end justify-between gap-4">
+            <div className="mb-4 flex items-end justify-between gap-4 flex-wrap">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Super Users</h1>
-                    <p className="text-gray-600 mt-1">
+                    <p className="text-gray-600 mt-1 text-sm">
                         {mode === 'cancelled'
                             ? 'Users who have cancelled at some point, ranked so you can reach out to high-activity churn.'
-                            : 'Users ranked by highest streak days.'}
+                            : 'Users ranked by activity — filter, sort, and export.'}
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -531,9 +716,157 @@ export default function SuperUsersPage() {
                 </div>
             </div>
 
+            {/* Toolbar: sort + filters + column picker */}
+            <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+                {/* Sort */}
+                <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Sort by</label>
+                    <select
+                        value={sortField}
+                        onChange={e => setSortField(e.target.value as SortField)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                        {SORT_OPTIONS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                    </select>
+                    <div className="bg-white p-0.5 rounded-md border border-gray-200 flex">
+                        <button
+                            onClick={() => setSortOrder('desc')}
+                            className={`px-2 py-1 text-xs font-medium rounded ${sortOrder === 'desc' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500'}`}
+                        >
+                            High → Low
+                        </button>
+                        <button
+                            onClick={() => setSortOrder('asc')}
+                            className={`px-2 py-1 text-xs font-medium rounded ${sortOrder === 'asc' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500'}`}
+                        >
+                            Low → High
+                        </button>
+                    </div>
+
+                    <div className="flex-1" />
+
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowColumnPicker(v => !v)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50"
+                        >
+                            Columns ({visibleColumns.size})
+                        </button>
+                        {showColumnPicker && (
+                            <div className="absolute right-0 mt-1 z-20 bg-white rounded-md shadow-lg border border-gray-200 p-2 min-w-[200px]">
+                                {COLUMN_DEFS.map(col => (
+                                    <label key={col.key} className="flex items-center gap-2 text-sm text-gray-700 py-1 px-2 rounded hover:bg-gray-50 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={visibleColumns.has(col.key)}
+                                            onChange={() => toggleColumn(col.key)}
+                                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        {col.label}
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="h-px bg-gray-100" />
+
+                {/* Filters */}
+                <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Filters</label>
+
+                    <select
+                        value={filters.hskLevel}
+                        onChange={e => setFilter('hskLevel', e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="">HSK: any</option>
+                        {HSK_LEVELS.map(l => <option key={l} value={l}>HSK {l}</option>)}
+                    </select>
+
+                    <select
+                        value={filters.pro}
+                        onChange={e => setFilter('pro', e.target.value as Filters['pro'])}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="all">Any status</option>
+                        <option value="pro">Pro only</option>
+                        <option value="free">Free only</option>
+                    </select>
+
+                    <select
+                        value={filters.notifications}
+                        onChange={e => setFilter('notifications', e.target.value as Filters['notifications'])}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="all">Notifications: any</option>
+                        <option value="on">Notifications: on</option>
+                        <option value="off">Notifications: off</option>
+                    </select>
+
+                    <select
+                        value={filters.platform}
+                        onChange={e => setFilter('platform', e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="">Platform: any</option>
+                        {PLATFORM_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+
+                    <select
+                        value={filters.surveyReason}
+                        onChange={e => setFilter('surveyReason', e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="">Reason: any</option>
+                        {REASON_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+
+                    <select
+                        value={filters.surveyReadingHours}
+                        onChange={e => setFilter('surveyReadingHours', e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                    >
+                        <option value="">Reading hours: any</option>
+                        {READING_HOURS_OPTIONS.map(rh => <option key={rh} value={rh}>{rh}</option>)}
+                    </select>
+
+                    <input
+                        type="text"
+                        value={filters.timezoneContains}
+                        onChange={e => setFilter('timezoneContains', e.target.value)}
+                        placeholder="Timezone contains…"
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white w-40"
+                    />
+
+                    <div className="flex items-center gap-1">
+                        <label className="text-xs text-gray-500">Min streak</label>
+                        <input
+                            type="number"
+                            min={0}
+                            value={filters.minStreak}
+                            onChange={e => setFilter('minStreak', e.target.value)}
+                            className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-md bg-white"
+                        />
+                    </div>
+
+                    {activeFilterCount > 0 && (
+                        <button
+                            onClick={() => setFilters(DEFAULT_FILTERS)}
+                            className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-800 underline"
+                        >
+                            Clear ({activeFilterCount})
+                        </button>
+                    )}
+                </div>
+            </div>
+
             {showExportModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !exporting && setShowExportModal(false)}>
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <h2 className="text-lg font-semibold text-gray-900">Export CSV</h2>
                         <p className="text-sm text-gray-600 mt-1">
                             {mode === 'cancelled' ? 'Cancelled subscribers' : 'Super users'} matching filter:{' '}
@@ -544,7 +877,7 @@ export default function SuperUsersPage() {
                         </p>
                         <div className="mt-4">
                             <label className="block text-sm font-medium text-gray-700">Rows to export</label>
-                            <div className="mt-1 flex items-center gap-2">
+                            <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <input
                                     type="number"
                                     min={1}
@@ -595,7 +928,7 @@ export default function SuperUsersPage() {
 
                         <div className="mt-4">
                             <label className="block text-sm font-medium text-gray-700">Start at row</label>
-                            <div className="mt-1 flex items-center gap-2">
+                            <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <input
                                     type="number"
                                     min={0}
@@ -632,16 +965,17 @@ export default function SuperUsersPage() {
                                 0-indexed offset into the sorted list. Rows exported: {exportOffset.toLocaleString()} to {(exportOffset + (exportLimit ?? 0)).toLocaleString()}.
                             </p>
                         </div>
+
                         <div className="mt-4">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Columns</label>
                         </div>
-                        <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="mt-2 grid grid-cols-2 gap-2">
                             {EXPORT_COLUMNS.map(col => (
                                 <label key={col.key} className="flex items-center gap-2 text-sm text-gray-700 py-1 px-2 rounded hover:bg-gray-50 cursor-pointer">
                                     <input
                                         type="checkbox"
-                                        checked={selectedColumns.has(col.key)}
-                                        onChange={() => toggleColumn(col.key)}
+                                        checked={selectedExportColumns.has(col.key)}
+                                        onChange={() => toggleExportColumn(col.key)}
                                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     />
                                     {col.label}
@@ -650,13 +984,13 @@ export default function SuperUsersPage() {
                         </div>
                         <div className="mt-2 flex gap-3 text-xs">
                             <button
-                                onClick={() => setSelectedColumns(new Set(EXPORT_COLUMNS.map(c => c.key)))}
+                                onClick={() => setSelectedExportColumns(new Set(EXPORT_COLUMNS.map(c => c.key)))}
                                 className="text-indigo-600 hover:text-indigo-800"
                             >
                                 Select all
                             </button>
                             <button
-                                onClick={() => setSelectedColumns(new Set())}
+                                onClick={() => setSelectedExportColumns(new Set())}
                                 className="text-gray-500 hover:text-gray-700"
                             >
                                 Clear
@@ -677,7 +1011,7 @@ export default function SuperUsersPage() {
                             </button>
                             <button
                                 onClick={downloadCsv}
-                                disabled={exporting || selectedColumns.size === 0 || exportLimit === null || exportLimit < 1}
+                                disabled={exporting || selectedExportColumns.size === 0 || exportLimit === null || exportLimit < 1}
                                 className="px-4 py-2 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {exporting
@@ -704,42 +1038,12 @@ export default function SuperUsersPage() {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
-                                <th
-                                    onClick={() => handleSort('full_name')}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                                >
-                                    Name{sortIndicator('full_name')}
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                                <th
-                                    onClick={() => handleSort('streak_days')}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                                >
-                                    Streak Days{sortIndicator('streak_days')}
-                                </th>
-                                <th
-                                    onClick={() => handleSort('longest_streak_days')}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                                >
-                                    Longest Streak{sortIndicator('longest_streak_days')}
-                                </th>
-                                <th
-                                    onClick={() => handleSort('seen_count')}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                                    title="Number of distinct characters this user has been shown"
-                                >
-                                    Seen{sortIndicator('seen_count')}
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Platform</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timezone</th>
-                                <th
-                                    onClick={() => handleSort('created_at')}
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                                >
-                                    Joined{sortIndicator('created_at')}
-                                </th>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                                {visibleColumnList.map(col => (
+                                    <th key={col.key} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        {col.label}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
@@ -747,67 +1051,71 @@ export default function SuperUsersPage() {
                                 const longest = user.longest_streak_days ?? user.streak_days;
                                 return (
                                     <tr key={user.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400 font-mono">
+                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-400 font-mono">
                                             {page * pageSize + index + 1}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                            {user.full_name || "—"}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {user.email || "—"}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold ${user.streak_days >= 100
-                                                ? 'bg-yellow-100 text-yellow-800'
-                                                : user.streak_days >= 30
-                                                    ? 'bg-green-100 text-green-800'
-                                                    : user.streak_days >= 7
-                                                        ? 'bg-blue-100 text-blue-800'
-                                                        : 'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                {user.streak_days >= 100 && '🔥 '}
-                                                {user.streak_days}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold ${longest >= 100
-                                                ? 'bg-yellow-100 text-yellow-800'
-                                                : longest >= 30
-                                                    ? 'bg-green-100 text-green-800'
-                                                    : longest >= 7
-                                                        ? 'bg-blue-100 text-blue-800'
-                                                        : 'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                {longest >= 100 && '🏆 '}
-                                                {longest}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">
-                                            {user.seen_count === null || user.seen_count === undefined ? '—' : user.seen_count.toLocaleString()}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_pro
-                                                ? 'bg-indigo-100 text-indigo-800'
-                                                : 'bg-gray-100 text-gray-600'
-                                                }`}>
-                                                {user.is_pro ? 'Pro' : 'Free'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {user.platform || "—"}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {user.timezone || "—"}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {new Date(user.created_at).toLocaleDateString()}
-                                        </td>
+                                        {visibleColumnList.map(col => (
+                                            <td key={col.key} className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                                {(() => {
+                                                    switch (col.key) {
+                                                        case 'name':
+                                                            return <span className="font-medium text-gray-900">{user.full_name || '—'}</span>;
+                                                        case 'email':
+                                                            return <span className="text-gray-500">{user.email || '—'}</span>;
+                                                        case 'streak_days':
+                                                            return (
+                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold ${user.streak_days >= 100 ? 'bg-yellow-100 text-yellow-800' : user.streak_days >= 30 ? 'bg-green-100 text-green-800' : user.streak_days >= 7 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                                    {user.streak_days >= 100 && '🔥 '}
+                                                                    {user.streak_days}
+                                                                </span>
+                                                            );
+                                                        case 'longest_streak_days':
+                                                            return (
+                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-bold ${longest >= 100 ? 'bg-yellow-100 text-yellow-800' : longest >= 30 ? 'bg-green-100 text-green-800' : longest >= 7 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                                    {longest >= 100 && '🏆 '}
+                                                                    {longest}
+                                                                </span>
+                                                            );
+                                                        case 'seen_count':
+                                                            return <span className="font-mono">{user.seen_count === null || user.seen_count === undefined ? '—' : user.seen_count.toLocaleString()}</span>;
+                                                        case 'hsk_level':
+                                                            return <span className="font-mono">{user.hsk_level ?? '—'}</span>;
+                                                        case 'daily_goal':
+                                                            return <span className="font-mono">{user.daily_goal ?? '—'}</span>;
+                                                        case 'notifications':
+                                                            return user.notifications_enabled === null || user.notifications_enabled === undefined ? '—' : (
+                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${user.notifications_enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                                                    {user.notifications_enabled ? 'on' : 'off'}
+                                                                </span>
+                                                            );
+                                                        case 'timezone':
+                                                            return <span className="text-gray-500">{user.timezone || '—'}</span>;
+                                                        case 'reading_hours':
+                                                            return <span className="text-gray-500">{user.survey_responses?.reading_hours || '—'}</span>;
+                                                        case 'reason':
+                                                            return <span className="text-gray-500">{user.survey_responses?.reason || '—'}</span>;
+                                                        case 'platform':
+                                                            return <span className="text-gray-500">{user.platform || '—'}</span>;
+                                                        case 'is_pro':
+                                                            return (
+                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${user.is_pro ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600'}`}>
+                                                                    {user.is_pro ? 'Pro' : 'Free'}
+                                                                </span>
+                                                            );
+                                                        case 'created_at':
+                                                            return <span className="text-gray-500">{new Date(user.created_at).toLocaleDateString()}</span>;
+                                                        default:
+                                                            return null;
+                                                    }
+                                                })()}
+                                            </td>
+                                        ))}
                                     </tr>
                                 );
                             })}
                             {users.length === 0 && (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-4 text-center text-sm text-gray-500">
+                                    <td colSpan={visibleColumnList.length + 1} className="px-6 py-4 text-center text-sm text-gray-500">
                                         {mode === 'cancelled' ? 'No cancelled subscribers found.' : 'No users found.'}
                                     </td>
                                 </tr>
@@ -817,7 +1125,6 @@ export default function SuperUsersPage() {
                 </div>
             )}
 
-            {/* Pagination */}
             <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-gray-500">
                     Showing {users.length === 0 ? 0 : page * pageSize + 1}–{page * pageSize + users.length} users
