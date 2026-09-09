@@ -13,9 +13,10 @@ type SuperUser = {
     platform: string | null;
     timezone: string | null;
     created_at: string;
+    seen_count?: number | null;
 };
 
-type SortField = 'streak_days' | 'longest_streak_days' | 'full_name' | 'created_at';
+type SortField = 'streak_days' | 'longest_streak_days' | 'full_name' | 'created_at' | 'seen_count';
 type SortOrder = 'asc' | 'desc';
 type Mode = 'all' | 'cancelled';
 
@@ -29,6 +30,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     { key: 'email', label: 'Email' },
     { key: 'streak_days', label: 'Streak Days' },
     { key: 'longest_streak_days', label: 'Longest Streak' },
+    { key: 'seen_count', label: 'Characters Seen' },
     { key: 'is_pro', label: 'Status (Pro/Free)' },
     { key: 'platform', label: 'Platform' },
     { key: 'timezone', label: 'Timezone' },
@@ -36,7 +38,12 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     { key: 'id', label: 'User ID' },
 ];
 
-const EXPORT_HARD_CAP = 10000;
+const EXPORT_HARD_CAP = 50000;
+
+// Ceiling on how many rows the seen-count RPC returns. Beyond this the
+// aggregation gets slow and the payload heavy; 5000 covers the "who saw the
+// most characters" question comfortably.
+const SEEN_RPC_MAX_ROWS = 5000;
 
 function csvEscape(value: unknown): string {
     if (value === null || value === undefined) return '';
@@ -56,6 +63,9 @@ function formatCsvValue(user: SuperUser, key: keyof SuperUser): string {
     if (key === 'longest_streak_days' && (v === null || v === undefined)) {
         return String(user.streak_days);
     }
+    if (key === 'seen_count' && (v === null || v === undefined)) {
+        return '';
+    }
     return v === null || v === undefined ? '' : String(v);
 }
 
@@ -72,6 +82,13 @@ export default function SuperUsersPage() {
     // .in('id', […]) URL under proxy limits), cache the full set, then sort
     // and paginate client-side.
     const [cancelledProfiles, setCancelledProfiles] = useState<SuperUser[] | null>(null);
+
+    // Cached result of top_super_users_by_seen(SEEN_RPC_MAX_ROWS). Aggregating
+    // user_seen_characters is a ~3-6s query, so we run it once per session and
+    // paginate/sort in memory afterwards. Also serves as the seen_count lookup
+    // for the Seen column when the user is on any other sort field.
+    const [seenSorted, setSeenSorted] = useState<SuperUser[] | null>(null);
+    const [seenLoading, setSeenLoading] = useState(false);
 
     // Sorting
     const [sortField, setSortField] = useState<SortField>('streak_days');
@@ -162,14 +179,76 @@ export default function SuperUsersPage() {
         return () => { cancelled = true; };
     }, [mode, cancelledIds, cancelledProfiles]);
 
+    // Kick off the seen-count RPC the first time the user selects that sort
+    // (or opens an export that needs it). Cached for the rest of the session.
+    useEffect(() => {
+        if (sortField !== 'seen_count') return;
+        if (seenSorted !== null) return;
+        let cancelled = false;
+        (async () => {
+            setSeenLoading(true);
+            setError(null);
+            try {
+                const { data, error: rpcErr } = await supabase.rpc('top_super_users_by_seen', {
+                    max_rows: SEEN_RPC_MAX_ROWS,
+                });
+                if (rpcErr) throw new Error(rpcErr.message);
+                const rows: SuperUser[] = (data ?? []).map((r: SuperUser & { seen_count: number | string | null }) => ({
+                    ...r,
+                    seen_count: typeof r.seen_count === 'string' ? parseInt(r.seen_count, 10) : r.seen_count ?? 0,
+                }));
+                if (!cancelled) setSeenSorted(rows);
+            } catch (err: unknown) {
+                if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load seen counts');
+            } finally {
+                if (!cancelled) setSeenLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [sortField, seenSorted]);
+
+    // Attach seen_count to rows once the cache is warm, regardless of sort field.
+    const enrichWithSeen = useCallback((rows: SuperUser[]): SuperUser[] => {
+        if (!seenSorted) return rows;
+        const counts = new Map<string, number>();
+        for (const r of seenSorted) {
+            if (r.id != null) counts.set(r.id, r.seen_count ?? 0);
+        }
+        return rows.map(r => ({ ...r, seen_count: counts.get(r.id) ?? r.seen_count ?? null }));
+    }, [seenSorted]);
+
     const fetchUsers = useCallback(async () => {
+        // seen_count sort is served entirely from the cached RPC result,
+        // for both 'all' and 'cancelled' modes.
+        if (sortField === 'seen_count') {
+            if (seenSorted === null) return; // effect above is loading
+            let source: SuperUser[];
+            if (mode === 'cancelled') {
+                if (cancelledIds === null) return;
+                const idSet = new Set(cancelledIds);
+                source = seenSorted.filter(u => idSet.has(u.id));
+            } else {
+                source = seenSorted;
+            }
+            const sorted = [...source].sort((a, b) => {
+                const va = a.seen_count ?? 0;
+                const vb = b.seen_count ?? 0;
+                return sortOrder === 'asc' ? va - vb : vb - va;
+            });
+            const from = page * pageSize;
+            setUsers(sorted.slice(from, from + pageSize));
+            setHasMore(sorted.length > from + pageSize);
+            setLoading(false);
+            return;
+        }
+
         if (mode === 'cancelled') {
             // Wait until the cached list has arrived.
             if (cancelledProfiles === null) return;
             const sorted = [...cancelledProfiles].sort((a, b) => {
                 const dir = sortOrder === 'asc' ? 1 : -1;
-                const va = a[sortField];
-                const vb = b[sortField];
+                const va = a[sortField as Exclude<SortField, 'seen_count'>];
+                const vb = b[sortField as Exclude<SortField, 'seen_count'>];
                 if (va === vb) return 0;
                 if (va === null || va === undefined) return 1;
                 if (vb === null || vb === undefined) return -1;
@@ -178,7 +257,7 @@ export default function SuperUsersPage() {
             });
             const from = page * pageSize;
             const slice = sorted.slice(from, from + pageSize);
-            setUsers(slice);
+            setUsers(enrichWithSeen(slice));
             setHasMore(sorted.length > from + pageSize);
             setLoading(false);
             return;
@@ -194,12 +273,12 @@ export default function SuperUsersPage() {
                 .from('profiles')
                 .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
                 .eq('is_beta', false)
-                .order(sortField, { ascending: sortOrder === 'asc', nullsFirst: false })
+                .order(sortField as Exclude<SortField, 'seen_count'>, { ascending: sortOrder === 'asc', nullsFirst: false })
                 .range(from, to);
 
             if (queryError) throw new Error(queryError.message);
 
-            setUsers(data || []);
+            setUsers(enrichWithSeen(data || []));
             setHasMore((data?.length || 0) === pageSize);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Unknown error';
@@ -207,7 +286,7 @@ export default function SuperUsersPage() {
         } finally {
             setLoading(false);
         }
-    }, [sortField, sortOrder, page, mode, cancelledProfiles]);
+    }, [sortField, sortOrder, page, mode, cancelledProfiles, cancelledIds, seenSorted, enrichWithSeen]);
 
     useEffect(() => {
         fetchUsers();
@@ -247,10 +326,18 @@ export default function SuperUsersPage() {
     const [exportCount, setExportCount] = useState<number | null>(null);
     const [countLoading, setCountLoading] = useState(false);
     const [exportLimit, setExportLimit] = useState<number | null>(null);
+    const [exportOffset, setExportOffset] = useState<number>(0);
 
     // When the export modal opens, resolve how many rows will be exported.
     useEffect(() => {
         if (!showExportModal) return;
+        if (sortField === 'seen_count') {
+            // The seen-count RPC caps at SEEN_RPC_MAX_ROWS, so that's the pool.
+            const n = seenSorted?.length ?? null;
+            setExportCount(n);
+            setExportLimit(prev => prev ?? (n === null ? null : Math.min(pageSize, n, EXPORT_HARD_CAP)));
+            return;
+        }
         if (mode === 'cancelled') {
             const n = cancelledProfiles?.length ?? null;
             setExportCount(n);
@@ -274,7 +361,7 @@ export default function SuperUsersPage() {
             setCountLoading(false);
         })();
         return () => { cancelled = true; };
-    }, [showExportModal, mode, cancelledProfiles]);
+    }, [showExportModal, mode, cancelledProfiles, sortField, seenSorted]);
 
     const toggleColumn = (key: keyof SuperUser) => {
         setSelectedColumns(prev => {
@@ -298,18 +385,39 @@ export default function SuperUsersPage() {
         });
     }, [sortField, sortOrder]);
 
-    const fetchAllForExport = useCallback(async (limit: number | null): Promise<SuperUser[]> => {
+    const fetchAllForExport = useCallback(async (limit: number | null, offset: number): Promise<SuperUser[]> => {
         const effectiveLimit = Math.min(limit ?? EXPORT_HARD_CAP, EXPORT_HARD_CAP);
+        const effectiveOffset = Math.max(offset, 0);
+
+        // seen_count is served from the cached RPC result (with counts already inlined).
+        if (sortField === 'seen_count') {
+            if (seenSorted === null) throw new Error('Seen-count data still loading');
+            let source = seenSorted;
+            if (mode === 'cancelled') {
+                if (cancelledIds === null) throw new Error('Cancelled subscribers still loading');
+                const idSet = new Set(cancelledIds);
+                source = seenSorted.filter(u => idSet.has(u.id));
+            }
+            const sorted = [...source].sort((a, b) => {
+                const va = a.seen_count ?? 0;
+                const vb = b.seen_count ?? 0;
+                return sortOrder === 'asc' ? va - vb : vb - va;
+            });
+            return sorted.slice(effectiveOffset, effectiveOffset + effectiveLimit);
+        }
+
         if (mode === 'cancelled') {
             if (cancelledProfiles === null) throw new Error('Cancelled subscribers still loading');
             const sorted = sortUsers(cancelledProfiles);
-            return sorted.slice(0, effectiveLimit);
+            const slice = sorted.slice(effectiveOffset, effectiveOffset + effectiveLimit);
+            return enrichWithSeen(slice);
         }
+
         const batchSize = 1000;
         const collected: SuperUser[] = [];
         let batchIdx = 0;
         while (true) {
-            const from = batchIdx * batchSize;
+            const from = effectiveOffset + batchIdx * batchSize;
             const remaining = effectiveLimit - collected.length;
             if (remaining <= 0) break;
             const take = Math.min(batchSize, remaining);
@@ -318,7 +426,7 @@ export default function SuperUsersPage() {
                 .from('profiles')
                 .select('id, full_name, email, streak_days, longest_streak_days, is_pro, platform, timezone, created_at')
                 .eq('is_beta', false)
-                .order(sortField, { ascending: sortOrder === 'asc', nullsFirst: false })
+                .order(sortField as Exclude<SortField, 'seen_count'>, { ascending: sortOrder === 'asc', nullsFirst: false })
                 .range(from, to);
             if (qErr) throw new Error(qErr.message);
             if (!data || data.length === 0) break;
@@ -326,8 +434,8 @@ export default function SuperUsersPage() {
             if (data.length < take) break;
             batchIdx++;
         }
-        return collected;
-    }, [mode, cancelledProfiles, sortField, sortOrder, sortUsers]);
+        return enrichWithSeen(collected);
+    }, [mode, cancelledProfiles, cancelledIds, sortField, sortOrder, sortUsers, seenSorted, enrichWithSeen]);
 
     const downloadCsv = async () => {
         if (selectedColumns.size === 0) {
@@ -337,7 +445,7 @@ export default function SuperUsersPage() {
         setExporting(true);
         setExportError(null);
         try {
-            const rows = await fetchAllForExport(exportLimit);
+            const rows = await fetchAllForExport(exportLimit, exportOffset);
             const orderedCols = EXPORT_COLUMNS.filter(c => selectedColumns.has(c.key));
             const header = orderedCols.map(c => csvEscape(c.label)).join(',');
             const body = rows
@@ -349,7 +457,8 @@ export default function SuperUsersPage() {
             const a = document.createElement('a');
             const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
             a.href = url;
-            a.download = `super-users-${mode}-${sortField}-${sortOrder}-${stamp}.csv`;
+            const offsetTag = exportOffset > 0 ? `-from${exportOffset}` : '';
+            a.download = `super-users-${mode}-${sortField}-${sortOrder}${offsetTag}-${stamp}.csv`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -374,7 +483,8 @@ export default function SuperUsersPage() {
 
     const isBusy = loading
         || (mode === 'cancelled' && cancelledLoading && cancelledIds === null)
-        || (mode === 'cancelled' && cancelledIds !== null && cancelledProfiles === null);
+        || (mode === 'cancelled' && cancelledIds !== null && cancelledProfiles === null)
+        || (sortField === 'seen_count' && seenLoading);
 
     return (
         <div>
@@ -451,7 +561,8 @@ export default function SuperUsersPage() {
                                     className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:ring-1 focus:outline-none"
                                 />
                                 {exportCount !== null && (() => {
-                                    const maxAllowed = Math.min(exportCount, EXPORT_HARD_CAP);
+                                    const remaining = Math.max(exportCount - exportOffset, 0);
+                                    const maxAllowed = Math.min(remaining, EXPORT_HARD_CAP);
                                     return (
                                         <button
                                             type="button"
@@ -462,8 +573,8 @@ export default function SuperUsersPage() {
                                         </button>
                                     );
                                 })()}
-                                {[50, 500, 5000].map(n => (
-                                    (exportCount === null || n < exportCount) && n < EXPORT_HARD_CAP ? (
+                                {[50, 500, 5000, 50000].map(n => (
+                                    (exportCount === null || n < exportCount) && n <= EXPORT_HARD_CAP ? (
                                         <button
                                             key={n}
                                             type="button"
@@ -477,9 +588,49 @@ export default function SuperUsersPage() {
                             </div>
                             {exportCount !== null && exportCount > EXPORT_HARD_CAP && (
                                 <p className="mt-1 text-xs text-gray-500">
-                                    Capped at {EXPORT_HARD_CAP.toLocaleString()} rows per export — narrow the filter or resort to page through more.
+                                    Capped at {EXPORT_HARD_CAP.toLocaleString()} rows per export — use Start row below to page through more.
                                 </p>
                             )}
+                        </div>
+
+                        <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700">Start at row</label>
+                            <div className="mt-1 flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={Math.max((exportCount ?? 0) - 1, 0)}
+                                    value={exportOffset}
+                                    onChange={e => {
+                                        const raw = e.target.value;
+                                        if (raw === '') { setExportOffset(0); return; }
+                                        const n = parseInt(raw, 10);
+                                        if (Number.isNaN(n) || n < 0) return;
+                                        const ceiling = Math.max((exportCount ?? 0) - 1, 0);
+                                        setExportOffset(Math.min(n, ceiling));
+                                    }}
+                                    className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:ring-1 focus:outline-none"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setExportOffset(0)}
+                                    className="text-xs text-gray-500 hover:text-gray-700"
+                                >
+                                    Reset
+                                </button>
+                                {exportCount !== null && exportLimit !== null && exportOffset + exportLimit < exportCount && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setExportOffset(exportOffset + exportLimit)}
+                                        className="text-xs text-indigo-600 hover:text-indigo-800"
+                                    >
+                                        Next page ({(exportOffset + exportLimit).toLocaleString()})
+                                    </button>
+                                )}
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">
+                                0-indexed offset into the sorted list. Rows exported: {exportOffset.toLocaleString()} to {(exportOffset + (exportLimit ?? 0)).toLocaleString()}.
+                            </p>
                         </div>
                         <div className="mt-4">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Columns</label>
@@ -573,6 +724,13 @@ export default function SuperUsersPage() {
                                 >
                                     Longest Streak{sortIndicator('longest_streak_days')}
                                 </th>
+                                <th
+                                    onClick={() => handleSort('seen_count')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    title="Number of distinct characters this user has been shown"
+                                >
+                                    Seen{sortIndicator('seen_count')}
+                                </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Platform</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timezone</th>
@@ -624,6 +782,9 @@ export default function SuperUsersPage() {
                                                 {longest}
                                             </span>
                                         </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">
+                                            {user.seen_count === null || user.seen_count === undefined ? '—' : user.seen_count.toLocaleString()}
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.is_pro
                                                 ? 'bg-indigo-100 text-indigo-800'
@@ -646,7 +807,7 @@ export default function SuperUsersPage() {
                             })}
                             {users.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="px-6 py-4 text-center text-sm text-gray-500">
+                                    <td colSpan={10} className="px-6 py-4 text-center text-sm text-gray-500">
                                         {mode === 'cancelled' ? 'No cancelled subscribers found.' : 'No users found.'}
                                     </td>
                                 </tr>
