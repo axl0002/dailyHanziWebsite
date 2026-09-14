@@ -77,7 +77,7 @@ export default function StoriesReadChart({ filter = 'all', dateRange = 'all' }: 
                                 return null;
                             }}
                         />
-                        <Bar dataKey="n" fill="#10B981" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="n" fill="#6366F1" radius={[4, 4, 0, 0]} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>

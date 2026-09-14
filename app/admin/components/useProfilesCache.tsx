@@ -31,12 +31,13 @@ export type CachedProfile = {
     theme: string | null;
     use_traditional: boolean | null;
     daily_sentence_count: number | null;
+    show_pinyin: boolean | null;
 };
 
 const PROFILE_SELECT =
     'id, is_pro, created_at, platform, hsk_level, survey_responses, ' +
     'selected_categories, reading_hours, timezone, theme, use_traditional, ' +
-    'daily_sentence_count';
+    'daily_sentence_count, show_pinyin';
 
 type Ctx = {
     profiles: CachedProfile[] | null;

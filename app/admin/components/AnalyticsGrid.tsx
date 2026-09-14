@@ -13,6 +13,7 @@ import PlatformChart from './PlatformChart';
 import DailySentenceCountChart from './DailySentenceCountChart';
 import ThemeChart from './ThemeChart';
 import TraditionalSimplifiedChart from './TraditionalSimplifiedChart';
+import PinyinEnabledChart from './PinyinEnabledChart';
 import SentencesReadChart from './SentencesReadChart';
 import StoriesReadChart from './StoriesReadChart';
 
@@ -33,6 +34,7 @@ export default function AnalyticsGrid({ filter, dateRange }: { filter: ProFilter
             <DailySentenceCountChart filter={filter} dateRange={dateRange} />
             <ThemeChart filter={filter} dateRange={dateRange} />
             <TraditionalSimplifiedChart filter={filter} dateRange={dateRange} />
+            <PinyinEnabledChart filter={filter} dateRange={dateRange} />
 
             {/* Existing distribution charts */}
             <HSKLevelChart filter={filter} />
