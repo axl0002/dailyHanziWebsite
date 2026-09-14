@@ -100,7 +100,9 @@ export default function ReferralChart({ filter, dateRange = 'all' }: { filter?: 
                                                 const isPro = entry.name === 'Pro Users';
                                                 const colorClass = isPro ? 'text-indigo-600' : 'text-gray-700';
                                                 const value = entry.value as number;
-                                                const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
+                                                const bucketTotal = (entry.payload as { total: number }).total;
+                                                const denominator = filter === 'all' ? bucketTotal : poolTotal;
+                                                const percentage = denominator > 0 ? ((value / denominator) * 100).toFixed(1) : '0.0';
 
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">

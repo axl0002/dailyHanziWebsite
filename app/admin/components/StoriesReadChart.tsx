@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '@/lib/supabase';
 
 type DateRange = 'all' | '30d' | '7d';
@@ -65,18 +65,26 @@ export default function StoriesReadChart({ filter = 'all', dateRange = 'all' }: 
         </div>
     );
 
-    const poolTotal = data.reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
-    const totalUsers = poolTotal;
-    const activeUsers = data
-        .filter(r => r.bucket !== '0')
-        .reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
+    if (filter === 'false') return (
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1 flex flex-col items-center justify-center h-[300px]">
+            <p className="text-gray-500 font-medium">Stories Read per User</p>
+            <p className="text-xs text-gray-400 mt-1">Pro feature — no data to show for Free users.</p>
+        </div>
+    );
+
+    // Pro-only chart: "mark as read" is a Pro feature. Ignore the free bar.
+    const poolTotal = data.reduce((s, r) => s + r.pro, 0);
+    const activeUsers = data.filter(r => r.bucket !== '0').reduce((s, r) => s + r.pro, 0);
     const rangeLabel = dateRange === 'all' ? 'all time' : dateRange === '30d' ? 'last 30 days' : 'last 7 days';
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <div className="flex items-baseline justify-between mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Stories Read per User</h3>
-                <span className="text-xs text-gray-500">{activeUsers.toLocaleString()} of {totalUsers.toLocaleString()} users read ≥1 ({rangeLabel})</span>
+            <div className="mb-6">
+                <div className="flex items-baseline justify-between">
+                    <h3 className="text-lg font-bold text-gray-900">Stories Read per User</h3>
+                    <span className="text-xs text-gray-500">{activeUsers.toLocaleString()} of {poolTotal.toLocaleString()} Pro users read ≥1 ({rangeLabel})</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Pro-only feature — Free users can&apos;t mark stories as read.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -97,45 +105,25 @@ export default function StoriesReadChart({ filter = 'all', dateRange = 'all' }: 
                             cursor={{ fill: '#F9FAFB' }}
                             content={({ active, payload, label }) => {
                                 if (active && payload && payload.length) {
+                                    const value = payload[0].value as number;
+                                    const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
                                     return (
                                         <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[150px]">
                                             <p className="font-semibold text-gray-900 mb-2">{label} stories read</p>
-                                            {payload.map((entry, index) => {
-                                                const isPro = entry.name === 'Pro Users';
-                                                const colorClass = isPro ? 'text-indigo-600' : 'text-gray-700';
-                                                const value = entry.value as number;
-                                                const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
-
-                                                return (
-                                                    <div key={index} className="flex items-center justify-between gap-4 mb-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <div
-                                                                className="w-2 h-2 rounded-full"
-                                                                style={{ backgroundColor: entry.color }}
-                                                            />
-                                                            <span className={`text-sm font-medium ${colorClass}`}>
-                                                                {entry.name}
-                                                            </span>
-                                                        </div>
-                                                        <span className={`text-sm font-bold ${colorClass}`}>
-                                                            {value} ({percentage}%)
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })}
+                                            <div className="flex items-center justify-between gap-4 mb-1">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#6366F1' }} />
+                                                    <span className="text-sm font-medium text-indigo-600">Pro Users</span>
+                                                </div>
+                                                <span className="text-sm font-bold text-indigo-600">{value} ({percentage}%)</span>
+                                            </div>
                                         </div>
                                     );
                                 }
                                 return null;
                             }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {filter !== 'false' && (
-                            <Bar dataKey="pro" name="Pro Users" stackId="users" fill="#6366F1" radius={filter === 'true' ? [4, 4, 0, 0] : [0, 0, 4, 4]} barSize={32} />
-                        )}
-                        {filter !== 'true' && (
-                            <Bar dataKey="free" name="Free Users" stackId="users" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={32} />
-                        )}
+                        <Bar dataKey="pro" name="Pro Users" fill="#6366F1" radius={[4, 4, 0, 0]} barSize={32} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>
