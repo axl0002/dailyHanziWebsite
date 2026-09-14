@@ -69,7 +69,8 @@ export default function SentencesReadChart({ filter = 'all', dateRange = 'all' }
         </div>
     );
 
-    const totalUsers = data.reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
+    const poolTotal = data.reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
+    const totalUsers = poolTotal;
     const activeUsers = data
         .filter(r => r.bucket !== '0')
         .reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
@@ -100,8 +101,6 @@ export default function SentencesReadChart({ filter = 'all', dateRange = 'all' }
                             cursor={{ fill: '#F9FAFB' }}
                             content={({ active, payload, label }) => {
                                 if (active && payload && payload.length) {
-                                    const row = payload[0].payload as Row;
-                                    const bucketTotal = filter === 'true' ? row.pro : filter === 'false' ? row.free : row.total;
                                     return (
                                         <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[150px]">
                                             <p className="font-semibold text-gray-900 mb-2">{label} sentences read</p>
@@ -109,7 +108,7 @@ export default function SentencesReadChart({ filter = 'all', dateRange = 'all' }
                                                 const isPro = entry.name === 'Pro Users';
                                                 const colorClass = isPro ? 'text-indigo-600' : 'text-gray-700';
                                                 const value = entry.value as number;
-                                                const percentage = bucketTotal > 0 ? ((value / bucketTotal) * 100).toFixed(1) : '0.0';
+                                                const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
 
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">

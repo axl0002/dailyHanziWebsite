@@ -61,6 +61,12 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
             .sort((a, b) => b.total - a.total);
     }, [profiles, filter, dateRange]);
 
+    const poolTotal = useMemo(() => {
+        return data.reduce((s, r) => {
+            return s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total);
+        }, 0);
+    }, [data, filter]);
+
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
             <span className="text-gray-400">Loading chart data...</span>
@@ -110,8 +116,7 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
                                                 const isPro = entry.name === 'Pro Users';
                                                 const colorClass = isPro ? 'text-indigo-600' : 'text-gray-700';
                                                 const value = entry.value as number;
-                                                const total = (entry.payload as { total: number }).total;
-                                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                                                const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
 
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">
