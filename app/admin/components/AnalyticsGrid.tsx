@@ -51,8 +51,8 @@ export default function AnalyticsGrid({ filter, dateRange }: { filter: ProFilter
             <ReadingHoursChart filter={filter} dateRange={dateRange} />
             <ReasonChart filter={filter} dateRange={dateRange} />
             <ReferralChart filter={filter} dateRange={dateRange} />
-            <CategoryChart filter={filter} dateRange={dateRange} />
             <ContinentChart filter={filter} dateRange={dateRange} />
+            <CategoryChart filter={filter} dateRange={dateRange} />
             <CountryChart filter={filter} dateRange={dateRange} />
             <TimezoneChart filter={filter} dateRange={dateRange} />
 
