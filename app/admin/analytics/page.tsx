@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import AnalyticsGrid from '../components/AnalyticsGrid';
+import { ProfilesCacheProvider } from '../components/useProfilesCache';
 
 type ProFilter = 'all' | 'true' | 'false';
 type DateRange = 'all' | '30d' | '7d';
@@ -14,6 +15,7 @@ export default function AnalyticsPage() {
     const [dateRange, setDateRange] = useState<DateRange>('all');
 
     return (
+        <ProfilesCacheProvider>
         <div className="p-6">
             <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
@@ -71,5 +73,6 @@ export default function AnalyticsPage() {
                 <AnalyticsGrid filter={filter} dateRange={dateRange} />
             </div>
         </div>
+        </ProfilesCacheProvider>
     );
 }

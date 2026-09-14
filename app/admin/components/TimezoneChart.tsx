@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
 
 type ChartData = {
     name: string;
@@ -11,99 +11,40 @@ type ChartData = {
     total: number;
 };
 
-export default function TimezoneChart({ filter }: { filter?: 'all' | 'true' | 'false' }) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function TimezoneChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+    const { profiles, loading } = useProfilesCache();
 
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            // Fetch ALL profiles with pagination
-            let allProfiles: { timezone: string | null; is_pro: boolean | null }[] = [];
-            let page = 0;
-            const pageSize = 1000;
-            let hasMore = true;
+    const data: ChartData[] = useMemo(() => {
+        const rows = filterProfiles(profiles, filter, dateRange);
+        const timezoneCounts: Record<string, { pro: number; free: number }> = {};
 
-            while (hasMore) {
-                const from = page * pageSize;
-                const to = from + pageSize - 1;
-
-                let query = supabase
-                    .from('profiles')
-                    .select('timezone, is_pro')
-                    .eq('is_beta', false)
-                    .order('id', { ascending: true })
-                    .range(from, to);
-
-                if (filter === 'true') {
-                    query = query.eq('is_pro', true);
-                } else if (filter === 'false') {
-                    query = query.eq('is_pro', false);
+        for (const profile of rows) {
+            const tz = profile.timezone;
+            if (tz) {
+                const key = tz.trim();
+                if (!timezoneCounts[key]) {
+                    timezoneCounts[key] = { pro: 0, free: 0 };
                 }
 
-                const { data: batch, error } = await query;
-
-                if (error) {
-                    console.error('Error fetching profiles:', error);
-                    setLoading(false);
-                    return;
-                }
-
-                if (batch && batch.length > 0) {
-                    allProfiles = [...allProfiles, ...batch];
-                    if (batch.length < pageSize) {
-                        hasMore = false;
-                    }
+                if (profile.is_pro) {
+                    timezoneCounts[key].pro++;
                 } else {
-                    hasMore = false;
-                }
-
-                page++;
-
-                // Safety break
-                if (allProfiles.length > 500000) {
-                    hasMore = false;
+                    timezoneCounts[key].free++;
                 }
             }
+        }
 
-            const profiles = allProfiles;
-
-            // Process data
-            const timezoneCounts: Record<string, { pro: number; free: number }> = {};
-
-            profiles?.forEach((profile: { timezone: string | null; is_pro: boolean | null }) => {
-                const tz = profile.timezone;
-                if (tz) {
-                    const key = tz.trim();
-                    if (!timezoneCounts[key]) {
-                        timezoneCounts[key] = { pro: 0, free: 0 };
-                    }
-
-                    if (profile.is_pro) {
-                        timezoneCounts[key].pro++;
-                    } else {
-                        timezoneCounts[key].free++;
-                    }
-                }
-            });
-
-            // Convert to array and sort by total descending
-            const chartData = Object.entries(timezoneCounts)
-                .map(([name, counts]) => ({
-                    name,
-                    pro: counts.pro,
-                    free: counts.free,
-                    total: counts.pro + counts.free
-                }))
-                .sort((a, b) => b.total - a.total)
-                .slice(0, 15); // Limit to top 15
-
-            setData(chartData);
-            setLoading(false);
-        };
-
-        fetchData();
-    }, [filter]);
+        // Convert to array and sort by total descending
+        return Object.entries(timezoneCounts)
+            .map(([name, counts]) => ({
+                name,
+                pro: counts.pro,
+                free: counts.free,
+                total: counts.pro + counts.free
+            }))
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 15); // Limit to top 15
+    }, [profiles, filter, dateRange]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">

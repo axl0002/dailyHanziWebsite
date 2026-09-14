@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
 
 type ChartData = {
     name: string;
@@ -11,104 +11,39 @@ type ChartData = {
     total: number;
 };
 
-export default function ReasonChart({ filter }: { filter?: 'all' | 'true' | 'false' }) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function ReasonChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+    const { profiles, loading } = useProfilesCache();
 
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            // Fetch ALL profiles with pagination
-            let allProfiles: { survey_responses: Record<string, unknown> | null; is_pro: boolean | null }[] = [];
-            let page = 0;
-            const pageSize = 1000;
-            let hasMore = true;
+    const data: ChartData[] = useMemo(() => {
+        const rows = filterProfiles(profiles, filter, dateRange);
+        const reasonCounts: Record<string, { pro: number; free: number }> = {};
 
-            while (hasMore) {
-                const from = page * pageSize;
-                const to = from + pageSize - 1;
-
-                let query = supabase
-                    .from('profiles')
-                    .select('survey_responses, is_pro')
-                    .eq('is_beta', false)
-                    .order('id', { ascending: true })
-                    .range(from, to);
-
-                if (filter === 'true') {
-                    query = query.eq('is_pro', true);
-                } else if (filter === 'false') {
-                    query = query.eq('is_pro', false);
+        for (const profile of rows) {
+            const reason = profile.survey_responses?.reason;
+            if (reason && typeof reason === 'string') {
+                const key = reason.trim();
+                if (!reasonCounts[key]) {
+                    reasonCounts[key] = { pro: 0, free: 0 };
                 }
 
-                const { data: batch, error } = await query;
-
-                if (error) {
-                    console.error('Error fetching profiles:', error);
-                    setLoading(false);
-                    return;
-                }
-
-                if (batch && batch.length > 0) {
-                    allProfiles = [...allProfiles, ...batch];
-                    if (batch.length < pageSize) {
-                        hasMore = false;
-                    }
+                if (profile.is_pro) {
+                    reasonCounts[key].pro++;
                 } else {
-                    hasMore = false;
-                }
-
-                page++;
-
-                // Safety break
-                if (allProfiles.length > 500000) {
-                    hasMore = false;
+                    reasonCounts[key].free++;
                 }
             }
+        }
 
-            const profiles = allProfiles;
-
-            // Process data
-            const reasonCounts: Record<string, { pro: number; free: number }> = {};
-
-            profiles?.forEach((profile: { survey_responses: Record<string, unknown> | null; is_pro: boolean | null }) => {
-                const responses = profile.survey_responses;
-                // Check if we have valid survey responses
-                if (responses && typeof responses === 'object' && !Array.isArray(responses)) {
-                    // Extract reason
-                    const reason = responses['reason'];
-
-                    if (reason && typeof reason === 'string') {
-                        const key = reason.trim();
-                        if (!reasonCounts[key]) {
-                            reasonCounts[key] = { pro: 0, free: 0 };
-                        }
-
-                        if (profile.is_pro) {
-                            reasonCounts[key].pro++;
-                        } else {
-                            reasonCounts[key].free++;
-                        }
-                    }
-                }
-            });
-
-            // Convert to array and sort by total descending
-            const chartData = Object.entries(reasonCounts)
-                .map(([name, counts]) => ({
-                    name,
-                    pro: counts.pro,
-                    free: counts.free,
-                    total: counts.pro + counts.free
-                }))
-                .sort((a, b) => b.total - a.total);
-
-            setData(chartData);
-            setLoading(false);
-        };
-
-        fetchData();
-    }, [filter]);
+        // Convert to array and sort by total descending
+        return Object.entries(reasonCounts)
+            .map(([name, counts]) => ({
+                name,
+                pro: counts.pro,
+                free: counts.free,
+                total: counts.pro + counts.free
+            }))
+            .sort((a, b) => b.total - a.total);
+    }, [profiles, filter, dateRange]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
 
 type ChartData = {
     name: string;
@@ -11,114 +11,55 @@ type ChartData = {
     total: number;
 };
 
-export default function CategoryChart({ filter }: { filter?: 'all' | 'true' | 'false' }) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [loading, setLoading] = useState(true);
+export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+    const { profiles, loading } = useProfilesCache();
 
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            // Fetch ALL profiles with pagination
-            let allProfiles: { selected_categories: string[] | string | null; is_pro: boolean | null }[] = [];
-            let page = 0;
-            const pageSize = 1000;
-            let hasMore = true;
+    const data: ChartData[] = useMemo(() => {
+        const rows = filterProfiles(profiles, filter, dateRange);
+        const categoryCounts: Record<string, { pro: number; free: number }> = {};
 
-            while (hasMore) {
-                const from = page * pageSize;
-                const to = from + pageSize - 1;
+        for (const profile of rows) {
+            const categories = profile.selected_categories;
 
-                let query = supabase
-                    .from('profiles')
-                    .select('selected_categories, is_pro')
-                    .eq('is_beta', false)
-                    .order('id', { ascending: true })
-                    .range(from, to);
+            if (categories) {
+                let catArray: string[] = [];
 
-                if (filter === 'true') {
-                    query = query.eq('is_pro', true);
-                } else if (filter === 'false') {
-                    query = query.eq('is_pro', false);
+                if (Array.isArray(categories)) {
+                    catArray = categories;
+                } else if (typeof categories === 'string') {
+                    // Handle comma-separated string just in case
+                    catArray = (categories as string).split(',').map((s: string) => s.trim());
                 }
 
-                const { data: batch, error } = await query;
+                catArray.forEach(cat => {
+                    if (cat) {
+                        const key = cat.trim();
+                        if (key) {
+                            if (!categoryCounts[key]) {
+                                categoryCounts[key] = { pro: 0, free: 0 };
+                            }
 
-                if (error) {
-                    console.error('Error fetching profiles:', error);
-                    setLoading(false);
-                    return;
-                }
-
-                if (batch && batch.length > 0) {
-                    allProfiles = [...allProfiles, ...batch];
-                    if (batch.length < pageSize) {
-                        hasMore = false;
-                    }
-                } else {
-                    hasMore = false;
-                }
-
-                page++;
-
-                // Safety break
-                if (allProfiles.length > 500000) {
-                    hasMore = false;
-                }
-            }
-
-            const profiles = allProfiles;
-
-            // Process data
-            const categoryCounts: Record<string, { pro: number; free: number }> = {};
-
-            profiles?.forEach((profile: { selected_categories: string[] | string | null; is_pro: boolean | null }) => {
-                const categories = profile.selected_categories;
-
-                if (categories) {
-                    let catArray: string[] = [];
-
-                    if (Array.isArray(categories)) {
-                        catArray = categories;
-                    } else if (typeof categories === 'string') {
-                        // Handle comma-separated string just in case
-                        catArray = categories.split(',').map(s => s.trim());
-                    }
-
-                    catArray.forEach(cat => {
-                        if (cat) {
-                            const key = cat.trim();
-                            if (key) {
-                                if (!categoryCounts[key]) {
-                                    categoryCounts[key] = { pro: 0, free: 0 };
-                                }
-
-                                if (profile.is_pro) {
-                                    categoryCounts[key].pro++;
-                                } else {
-                                    categoryCounts[key].free++;
-                                }
+                            if (profile.is_pro) {
+                                categoryCounts[key].pro++;
+                            } else {
+                                categoryCounts[key].free++;
                             }
                         }
-                    });
-                }
-            });
+                    }
+                });
+            }
+        }
 
-            // Convert to array and sort by total descending
-            const chartData = Object.entries(categoryCounts)
-                .map(([name, counts]) => ({
-                    name,
-                    pro: counts.pro,
-                    free: counts.free,
-                    total: counts.pro + counts.free
-                }))
-                .sort((a, b) => b.total - a.total);
-
-            setData(chartData);
-            setLoading(false);
-        };
-
-        fetchData();
-    }, [filter]);
+        // Convert to array and sort by total descending
+        return Object.entries(categoryCounts)
+            .map(([name, counts]) => ({
+                name,
+                pro: counts.pro,
+                free: counts.free,
+                total: counts.pro + counts.free
+            }))
+            .sort((a, b) => b.total - a.total);
+    }, [profiles, filter, dateRange]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">

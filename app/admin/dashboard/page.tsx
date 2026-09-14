@@ -14,6 +14,7 @@ import TimezoneByDayChart from "../components/TimezoneByDayChart";
 import TrialCancellationChart from "../components/TrialCancellationChart";
 import TrialCancellationRateOverTimeChart from "../components/TrialCancellationRateOverTimeChart";
 import AnalyticsGrid from "../components/AnalyticsGrid";
+import { ProfilesCacheProvider } from "../components/useProfilesCache";
 import { useDateLabels } from "../components/useDateLabels";
 
 type DateRange = 'all' | '30d' | '7d';
@@ -156,7 +157,9 @@ export default function AdminDashboard() {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <AnalyticsGrid filter={filter} dateRange={dateRange} />
+                    <ProfilesCacheProvider>
+                        <AnalyticsGrid filter={filter} dateRange={dateRange} />
+                    </ProfilesCacheProvider>
                 </div>
             </div>
         </div>
