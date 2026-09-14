@@ -16,27 +16,40 @@ type Row = { bucket: string; sort_order: number; pro: number; free: number; tota
 export default function SentencesReadChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const [data, setData] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
+            setError(null);
             const since = dateRange === '7d'
                 ? new Date(Date.now() - 7 * 86400_000).toISOString()
                 : dateRange === '30d'
                     ? new Date(Date.now() - 30 * 86400_000).toISOString()
                     : null;
 
-            const { data: raw, error } = await supabase.rpc('sentences_read_histogram', { since_date: since });
-            if (error) { console.error(error); setLoading(false); return; }
-            const rows: Row[] = Array.isArray(raw)
-                ? (raw as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
-                    bucket: r.bucket,
-                    sort_order: r.sort_order,
-                    pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : r.pro,
-                    free: typeof r.free === 'string' ? parseInt(r.free, 10) : r.free,
-                    total: typeof r.total === 'string' ? parseInt(r.total, 10) : r.total,
-                }))
-                : [];
+            const { data: raw, error: rpcErr } = await supabase.rpc('sentences_read_histogram', { since_date: since });
+            if (rpcErr) {
+                console.error('sentences_read_histogram:', rpcErr);
+                setError(rpcErr.message ?? 'RPC failed');
+                setLoading(false);
+                return;
+            }
+            // RPC returns a single jsonb value (an array). supabase-js unwraps it, so
+            // raw should already be the array — but some clients / edge cases wrap it
+            // in { data: [...] }, so unwrap defensively.
+            const arr = Array.isArray(raw)
+                ? raw
+                : (raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown }).data))
+                    ? (raw as { data: unknown[] }).data
+                    : [];
+            const rows: Row[] = (arr as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
+                bucket: r.bucket,
+                sort_order: r.sort_order,
+                pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : (r.pro ?? 0),
+                free: typeof r.free === 'string' ? parseInt(r.free, 10) : (r.free ?? 0),
+                total: typeof r.total === 'string' ? parseInt(r.total, 10) : (r.total ?? 0),
+            }));
             setData(rows);
             setLoading(false);
         };
@@ -46,6 +59,13 @@ export default function SentencesReadChart({ filter = 'all', dateRange = 'all' }
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
             <span className="text-gray-400">Loading chart data...</span>
+        </div>
+    );
+
+    if (error) return (
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
+            <p className="text-red-600 font-medium">Failed to load Sentences Read</p>
+            <p className="text-xs text-gray-500 mt-1">{error}</p>
         </div>
     );
 
