@@ -81,7 +81,10 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">Selected Categories</h3>
+            <div className="mb-6">
+                <h3 className="text-lg font-bold text-gray-900">Selected Categories</h3>
+                <p className="text-xs text-gray-500 mt-1">Users can pick multiple categories — percentages sum to more than 100%.</p>
+            </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
