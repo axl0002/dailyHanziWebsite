@@ -61,27 +61,50 @@ export function ProfilesCacheProvider({ children }: { children: ReactNode }) {
             setLoading(true);
             setError(null);
             try {
-                const all: CachedProfile[] = [];
-                let page = 0;
-                const pageSize = 1000;
-                while (true) {
-                    const from = page * pageSize;
-                    const to = from + pageSize - 1;
-                    const { data, error: qErr } = await supabase
-                        .from('profiles')
-                        .select(PROFILE_SELECT)
-                        .eq('is_beta', false)
-                        .order('id', { ascending: true })
-                        .range(from, to);
-                    if (qErr) throw new Error(qErr.message);
-                    if (!data || data.length === 0) break;
-                    all.push(...(data as unknown as CachedProfile[]));
-                    if (data.length < pageSize) break;
-                    page++;
-                    if (all.length > 500000) break; // sanity cap
-                    if (cancelled) return;
+                // 1) Head-only request to learn the total row count (Content-Range).
+                const { count, error: countErr } = await supabase
+                    .from('profiles')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('is_beta', false);
+                if (countErr) throw new Error(countErr.message);
+                const total = Math.min(count ?? 0, 500000);
+                if (total === 0) {
+                    if (!cancelled) setProfiles([]);
+                    return;
                 }
-                if (!cancelled) setProfiles(all);
+
+                // 2) Fire page fetches in parallel batches. PostgREST's per-response
+                // db-max-rows on this project is 1000, so 1000 is our page size.
+                // Concurrency = 8 keeps us well under Supabase's typical connection
+                // pool limits while cutting wall-clock ~8×.
+                const pageSize = 1000;
+                const concurrency = 8;
+                const totalPages = Math.ceil(total / pageSize);
+                const results: CachedProfile[][] = new Array(totalPages);
+
+                for (let batchStart = 0; batchStart < totalPages; batchStart += concurrency) {
+                    if (cancelled) return;
+                    const batch = [];
+                    for (let i = batchStart; i < Math.min(batchStart + concurrency, totalPages); i++) {
+                        batch.push((async (pageIdx: number) => {
+                            const from = pageIdx * pageSize;
+                            const to = from + pageSize - 1;
+                            const { data, error: qErr } = await supabase
+                                .from('profiles')
+                                .select(PROFILE_SELECT)
+                                .eq('is_beta', false)
+                                .order('id', { ascending: true })
+                                .range(from, to);
+                            if (qErr) throw new Error(qErr.message);
+                            results[pageIdx] = (data ?? []) as unknown as CachedProfile[];
+                        })(i));
+                    }
+                    await Promise.all(batch);
+                }
+                if (cancelled) return;
+                const merged: CachedProfile[] = [];
+                for (const chunk of results) if (chunk) merged.push(...chunk);
+                setProfiles(merged);
             } catch (e: unknown) {
                 if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load profiles');
             } finally {

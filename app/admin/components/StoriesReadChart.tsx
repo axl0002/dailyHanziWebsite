@@ -5,12 +5,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { supabase } from '@/lib/supabase';
 
 type DateRange = 'all' | '30d' | '7d';
+type ProFilter = 'all' | 'true' | 'false';
 
 type Row = { bucket: string; sort_order: number; n: number };
 
 // Histogram of users bucketed by how many stories they've marked as read.
 // Backed by stories_read_histogram RPC.
-export default function StoriesReadChart({ dateRange = 'all' }: { dateRange?: DateRange }) {
+export default function StoriesReadChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const [data, setData] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -23,7 +24,7 @@ export default function StoriesReadChart({ dateRange = 'all' }: { dateRange?: Da
                     ? new Date(Date.now() - 30 * 86400_000).toISOString()
                     : null;
 
-            const { data: raw, error } = await supabase.rpc('stories_read_histogram', { since_date: since });
+            const { data: raw, error } = await supabase.rpc('stories_read_histogram', { since_date: since, pro_filter: filter });
             if (error) { console.error(error); setLoading(false); return; }
             const rows: Row[] = Array.isArray(raw)
                 ? (raw as { bucket: string; sort_order: number; n: number | string }[]).map(r => ({
@@ -36,7 +37,7 @@ export default function StoriesReadChart({ dateRange = 'all' }: { dateRange?: Da
             setLoading(false);
         };
         fetchData();
-    }, [dateRange]);
+    }, [dateRange, filter]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">

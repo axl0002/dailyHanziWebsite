@@ -3,16 +3,22 @@
 -- SECURITY DEFINER + is_staff() gate. Returns jsonb array to bypass PostgREST's
 -- db-max-rows cap on this project.
 --
--- Passing since_date restricts the read window (e.g. reads in the last 30 days);
--- pass null for all-time. In every mode users with 0 reads are included in the
--- '0' bucket so % inactive is visible.
+-- since_date is inclusive; pass null for all-time.
+-- pro_filter is 'all' | 'true' | 'false' — matches the toolbar's Pro/Free selector.
+-- In every mode users with 0 reads are included in the '0' bucket so % inactive
+-- is visible.
 
 drop function if exists public.sentences_read_by_day(timestamptz);
 drop function if exists public.stories_read_by_day(timestamptz);
 drop function if exists public.sentences_read_histogram(timestamptz);
 drop function if exists public.stories_read_histogram(timestamptz);
+drop function if exists public.sentences_read_histogram(timestamptz, text);
+drop function if exists public.stories_read_histogram(timestamptz, text);
 
-create or replace function public.sentences_read_histogram(since_date timestamptz default null)
+create or replace function public.sentences_read_histogram(
+    since_date timestamptz default null,
+    pro_filter text default 'all'
+)
 returns jsonb
 language plpgsql
 security definer
@@ -37,6 +43,11 @@ begin
         from public.profiles p
         left join reads_per_user r on r.user_id = p.id
         where p.is_beta = false
+          and (
+              pro_filter = 'all'
+              or (pro_filter = 'true' and p.is_pro = true)
+              or (pro_filter = 'false' and (p.is_pro is null or p.is_pro = false))
+          )
     ),
     bucketed as (
         select
@@ -70,11 +81,14 @@ begin
 end;
 $$;
 
-revoke all on function public.sentences_read_histogram(timestamptz) from public;
-grant execute on function public.sentences_read_histogram(timestamptz) to authenticated;
+revoke all on function public.sentences_read_histogram(timestamptz, text) from public;
+grant execute on function public.sentences_read_histogram(timestamptz, text) to authenticated;
 
 
-create or replace function public.stories_read_histogram(since_date timestamptz default null)
+create or replace function public.stories_read_histogram(
+    since_date timestamptz default null,
+    pro_filter text default 'all'
+)
 returns jsonb
 language plpgsql
 security definer
@@ -99,6 +113,11 @@ begin
         from public.profiles p
         left join reads_per_user r on r.user_id = p.id
         where p.is_beta = false
+          and (
+              pro_filter = 'all'
+              or (pro_filter = 'true' and p.is_pro = true)
+              or (pro_filter = 'false' and (p.is_pro is null or p.is_pro = false))
+          )
     ),
     bucketed as (
         select
@@ -132,5 +151,5 @@ begin
 end;
 $$;
 
-revoke all on function public.stories_read_histogram(timestamptz) from public;
-grant execute on function public.stories_read_histogram(timestamptz) to authenticated;
+revoke all on function public.stories_read_histogram(timestamptz, text) from public;
+grant execute on function public.stories_read_histogram(timestamptz, text) to authenticated;

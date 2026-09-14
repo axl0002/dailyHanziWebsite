@@ -26,8 +26,8 @@ export default function AnalyticsGrid({ filter, dateRange }: { filter: ProFilter
     return (
         <>
             {/* Content engagement — histograms of user activity */}
-            <SentencesReadChart dateRange={dateRange} />
-            <StoriesReadChart dateRange={dateRange} />
+            <SentencesReadChart filter={filter} dateRange={dateRange} />
+            <StoriesReadChart filter={filter} dateRange={dateRange} />
 
             {/* Profile characteristics — new charts */}
             <DailySentenceCountChart filter={filter} dateRange={dateRange} />
