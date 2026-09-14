@@ -53,20 +53,19 @@ export default function ReferralChart({ filter, dateRange = 'all' }: { filter?: 
 
     if (data.length === 0) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No referral data available</p>
-            <p className="text-sm text-gray-400 mt-1">Survey responses will appear here.</p>
+            <p className="text-gray-500 font-medium">No Referral Source data available</p>
         </div>
     );
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">Referral Sources</h3>
+            <h3 className="text-lg font-bold mb-6 text-gray-900">Referral Source</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
                         layout="vertical"
-                        margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                     >
                         <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f0f0f0" />
                         <XAxis
@@ -79,8 +78,8 @@ export default function ReferralChart({ filter, dateRange = 'all' }: { filter?: 
                         <YAxis
                             type="category"
                             dataKey="name"
-                            width={100}
-                            tick={{ fontSize: 12, fill: '#6B7280' }}
+                            width={120}
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
                         />

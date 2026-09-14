@@ -38,37 +38,70 @@ export default function ThemeChart({ filter, dateRange = 'all' }: { filter?: Pro
         </div>
     );
 
+    if (data.length === 0) return (
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
+            <p className="text-gray-500 font-medium">No Theme data available</p>
+        </div>
+    );
+
     return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <h3 className="text-lg font-bold mb-6 text-gray-900">Theme</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6B7280' }} tickLine={false} axisLine={false} />
-                        <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
+                            tickLine={false}
+                            axisLine={false}
+                        />
+                        <YAxis
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
+                            tickLine={false}
+                            axisLine={false}
+                        />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
                             content={({ active, payload, label }) => {
                                 if (active && payload && payload.length) {
                                     return (
-                                        <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl">
+                                        <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[150px]">
                                             <p className="font-semibold text-gray-900 mb-2">{label}</p>
-                                            {payload.map((entry, i) => (
-                                                <div key={i} className="flex items-center justify-between gap-4">
-                                                    <span className="text-sm text-gray-700">{entry.name}</span>
-                                                    <span className="text-sm font-bold text-gray-900">{Number(entry.value).toLocaleString()}</span>
-                                                </div>
-                                            ))}
+                                            {payload.map((entry, index) => {
+                                                const isPro = entry.name === 'Pro Users';
+                                                const colorClass = isPro ? 'text-indigo-600' : 'text-gray-700';
+                                                const value = entry.value as number;
+                                                const total = (entry.payload as { total: number }).total;
+                                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+
+                                                return (
+                                                    <div key={index} className="flex items-center justify-between gap-4 mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className="w-2 h-2 rounded-full"
+                                                                style={{ backgroundColor: entry.color }}
+                                                            />
+                                                            <span className={`text-sm font-medium ${colorClass}`}>
+                                                                {entry.name}
+                                                            </span>
+                                                        </div>
+                                                        <span className={`text-sm font-bold ${colorClass}`}>
+                                                            {value} ({percentage}%)
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     );
                                 }
                                 return null;
                             }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                        <Bar dataKey="pro" name="Pro Users" stackId="a" fill="#6366F1" radius={[0, 0, 4, 4]} />
-                        <Bar dataKey="free" name="Free Users" stackId="a" fill="#CBD5E1" radius={[4, 4, 0, 0]} />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        <Bar dataKey="pro" name="Pro Users" stackId="users" fill="#6366F1" radius={[0, 0, 4, 4]} barSize={32} />
+                        <Bar dataKey="free" name="Free Users" stackId="users" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={32} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>

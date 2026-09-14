@@ -58,7 +58,7 @@ export default function ReadingHoursChart({ filter, dateRange = 'all' }: { filte
     );
 
     return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <h3 className="text-lg font-bold mb-6 text-gray-900">Reading Hours</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">

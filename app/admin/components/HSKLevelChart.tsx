@@ -53,33 +53,30 @@ export default function HSKLevelChart({ filter, dateRange = 'all' }: { filter?: 
 
     if (data.length === 0) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No HSK level data available</p>
-            <p className="text-sm text-gray-400 mt-1">User levels will appear here.</p>
+            <p className="text-gray-500 font-medium">No HSK Level data available</p>
         </div>
     );
 
     return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">User HSK Levels</h3>
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
+            <h3 className="text-lg font-bold mb-6 text-gray-900">HSK Level</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
-                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
                     >
-                        <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={true} stroke="#f0f0f0" />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                         <XAxis
                             dataKey="name"
-                            tick={{ fontSize: 12, fill: '#6B7280' }}
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
                         />
                         <YAxis
-                            width={30}
-                            tick={{ fontSize: 12, fill: '#6B7280' }}
+                            tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            allowDecimals={false}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
@@ -119,8 +116,8 @@ export default function HSKLevelChart({ filter, dateRange = 'all' }: { filter?: 
                             }}
                         />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        <Bar dataKey="pro" name="Pro Users" stackId="hsk" fill="#6366F1" radius={[0, 0, 4, 4]} barSize={24} />
-                        <Bar dataKey="free" name="Free Users" stackId="hsk" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={24} />
+                        <Bar dataKey="pro" name="Pro Users" stackId="users" fill="#6366F1" radius={[0, 0, 4, 4]} barSize={32} />
+                        <Bar dataKey="free" name="Free Users" stackId="users" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={32} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>

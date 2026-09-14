@@ -60,7 +60,7 @@ export default function ReasonChart({ filter, dateRange = 'all' }: { filter?: Pr
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">Reason for Downloading</h3>
+            <h3 className="text-lg font-bold mb-6 text-gray-900">Reason</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart

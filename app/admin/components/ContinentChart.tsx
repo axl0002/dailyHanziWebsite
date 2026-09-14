@@ -74,14 +74,13 @@ export default function ContinentChart({ filter, dateRange = 'all' }: { filter?:
     if (data.length === 0) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
             <p className="text-gray-500 font-medium">No Continent data available</p>
-            <p className="text-sm text-gray-400 mt-1">User locations will appear here.</p>
         </div>
     );
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">User Locations (Continent)</h3>
-            <div className="h-[400px] w-full">
+            <h3 className="text-lg font-bold mb-6 text-gray-900">Continent</h3>
+            <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
@@ -103,7 +102,6 @@ export default function ContinentChart({ filter, dateRange = 'all' }: { filter?:
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}

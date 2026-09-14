@@ -55,14 +55,13 @@ export default function TimezoneChart({ filter, dateRange = 'all' }: { filter?: 
     if (data.length === 0) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
             <p className="text-gray-500 font-medium">No Timezone data available</p>
-            <p className="text-sm text-gray-400 mt-1">User locations will appear here.</p>
         </div>
     );
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
-            <h3 className="text-lg font-bold mb-6 text-gray-900">User Locations (Timezone)</h3>
-            <div className="h-[500px] w-full">
+            <h3 className="text-lg font-bold mb-6 text-gray-900">Timezone</h3>
+            <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
@@ -80,11 +79,10 @@ export default function TimezoneChart({ filter, dateRange = 'all' }: { filter?: 
                         <YAxis
                             type="category"
                             dataKey="name"
-                            width={220}
+                            width={120}
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
-                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
@@ -124,8 +122,8 @@ export default function TimezoneChart({ filter, dateRange = 'all' }: { filter?: 
                             }}
                         />
                         <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                        <Bar dataKey="pro" name="Pro Users" stackId="timezone" fill="#6366F1" radius={[0, 0, 4, 4]} barSize={20} />
-                        <Bar dataKey="free" name="Free Users" stackId="timezone" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={20} />
+                        <Bar dataKey="pro" name="Pro Users" stackId="timezone" fill="#6366F1" radius={[0, 0, 4, 4]} barSize={24} />
+                        <Bar dataKey="free" name="Free Users" stackId="timezone" fill="#CBD5E1" radius={[4, 4, 0, 0]} barSize={24} />
                     </BarChart>
                 </ResponsiveContainer>
             </div>
