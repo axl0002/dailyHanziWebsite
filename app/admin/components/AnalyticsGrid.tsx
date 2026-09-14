@@ -16,6 +16,9 @@ import DailySentenceCountChart from './DailySentenceCountChart';
 import PinyinEnabledChart from './PinyinEnabledChart';
 import SentencesReadChart from './SentencesReadChart';
 import StoriesReadChart from './StoriesReadChart';
+import SavedCharactersChart from './SavedCharactersChart';
+import LearnedCharactersChart from './LearnedCharactersChart';
+import InReviewCharactersChart from './InReviewCharactersChart';
 
 type ProFilter = 'all' | 'true' | 'false';
 type DateRange = 'all' | '30d' | '7d';
@@ -68,6 +71,9 @@ export default function AnalyticsGrid({ filter, dateRange }: { filter: ProFilter
             <PinyinEnabledChart filter={filter} dateRange={dateRange} />
             <SentencesReadChart filter={filter} dateRange={dateRange} />
             <StoriesReadChart filter={filter} dateRange={dateRange} />
+            <SavedCharactersChart filter={filter} dateRange={dateRange} />
+            <LearnedCharactersChart filter={filter} dateRange={dateRange} />
+            <InReviewCharactersChart filter={filter} dateRange={dateRange} />
         </>
     );
 }
