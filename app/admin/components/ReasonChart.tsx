@@ -89,6 +89,7 @@ export default function ReasonChart({ filter, dateRange = 'all' }: { filter?: Pr
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
+                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}

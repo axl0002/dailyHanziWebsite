@@ -108,6 +108,7 @@ export default function ContinentChart({ filter, dateRange = 'all' }: { filter?:
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
+                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}

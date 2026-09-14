@@ -62,6 +62,11 @@ export default function CountryChart({ filter, dateRange = 'all' }: { filter?: P
         }, 0);
     }, [data, filter]);
 
+    // ~28px per row + fixed footer for legend/axis. Ensures every y-axis
+    // label stays visible with interval={0}. Floor of 300 keeps small
+    // filtered results from looking cramped.
+    const chartHeight = Math.max(300, data.length * 28 + 60);
+
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
             <span className="text-gray-400">Loading chart data...</span>
@@ -77,7 +82,7 @@ export default function CountryChart({ filter, dateRange = 'all' }: { filter?: P
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <h3 className="text-lg font-bold mb-6 text-gray-900">Country</h3>
-            <div className="h-[300px] w-full">
+            <div className="w-full" style={{ height: chartHeight }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
@@ -99,6 +104,7 @@ export default function CountryChart({ filter, dateRange = 'all' }: { filter?: P
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
+                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}

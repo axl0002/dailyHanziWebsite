@@ -67,6 +67,11 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
         }, 0);
     }, [data, filter]);
 
+    // ~28px per row + fixed footer for legend/axis. Ensures every y-axis
+    // label stays visible with interval={0}. Floor of 300 keeps small
+    // filtered results from looking cramped.
+    const chartHeight = Math.max(300, data.length * 28 + 60);
+
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
             <span className="text-gray-400">Loading chart data...</span>
@@ -85,7 +90,7 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
                 <h3 className="text-lg font-bold text-gray-900">Selected Categories</h3>
                 <p className="text-xs text-gray-500 mt-1">Users can pick multiple categories — percentages sum to more than 100%.</p>
             </div>
-            <div className="h-[300px] w-full">
+            <div className="w-full" style={{ height: chartHeight }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                         data={data}
@@ -107,6 +112,7 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
+                            interval={0}
                         />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
