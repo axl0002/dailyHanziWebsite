@@ -61,7 +61,7 @@ export default function HSKLevelChart({ filter }: { filter?: 'all' | 'true' | 'f
                 page++;
 
                 // Safety break
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     hasMore = false;
                 }
             }

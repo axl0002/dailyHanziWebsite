@@ -142,7 +142,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                         hasMore = false;
                     }
                     page++;
-                    if (out.length > 50000) hasMore = false;
+                    if (out.length > 500000) hasMore = false;
                 }
                 return out;
             };

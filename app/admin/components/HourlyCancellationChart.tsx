@@ -94,7 +94,7 @@ export default function HourlyCancellationChart() {
 
                 page++;
 
-                if (allRows.length > 50000) {
+                if (allRows.length > 500000) {
                     console.warn('Reached safety limit of 50k cancellations');
                     hasMore = false;
                 }

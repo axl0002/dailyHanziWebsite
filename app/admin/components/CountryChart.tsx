@@ -71,7 +71,7 @@ export default function CountryChart({ filter }: { filter?: 'all' | 'true' | 'fa
 
                 page++;
 
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     hasMore = false;
                 }
             }

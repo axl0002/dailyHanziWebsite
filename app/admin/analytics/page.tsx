@@ -1,22 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-
-import HSKLevelChart from '../components/HSKLevelChart';
-import ReasonChart from '../components/ReasonChart';
-import ReferralChart from '../components/ReferralChart';
-import CategoryChart from '../components/CategoryChart';
-import ReadingHoursChart from '../components/ReadingHoursChart';
-import ContinentChart from '../components/ContinentChart';
-import CountryChart from '../components/CountryChart';
-import TimezoneChart from '../components/TimezoneChart';
-import PlatformChart from '../components/PlatformChart';
-
-import DailySentenceCountChart from '../components/DailySentenceCountChart';
-import ThemeChart from '../components/ThemeChart';
-import TraditionalSimplifiedChart from '../components/TraditionalSimplifiedChart';
-import SentencesReadChart from '../components/SentencesReadChart';
-import StoriesReadChart from '../components/StoriesReadChart';
+import AnalyticsGrid from '../components/AnalyticsGrid';
 
 type ProFilter = 'all' | 'true' | 'false';
 type DateRange = 'all' | '30d' | '7d';
@@ -24,9 +9,6 @@ type DateRange = 'all' | '30d' | '7d';
 // Non-revenue analytics visible to both admins and moderators. The revenue-
 // sensitive charts (cancellation, trial cancellation, pro %, etc.) stay on
 // /admin/dashboard which is admin-only in middleware.ts.
-//
-// The date range applies to charts that support it (the new ones on this page).
-// Existing distribution charts are always all-time.
 export default function AnalyticsPage() {
     const [filter, setFilter] = useState<ProFilter>('all');
     const [dateRange, setDateRange] = useState<DateRange>('all');
@@ -86,25 +68,7 @@ export default function AnalyticsPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Content engagement — spans two columns */}
-                <SentencesReadChart dateRange={dateRange} />
-                <StoriesReadChart dateRange={dateRange} />
-
-                {/* Profile characteristics (new) */}
-                <DailySentenceCountChart filter={filter} dateRange={dateRange} />
-                <ThemeChart filter={filter} dateRange={dateRange} />
-                <TraditionalSimplifiedChart filter={filter} dateRange={dateRange} />
-
-                {/* Existing distribution charts */}
-                <HSKLevelChart filter={filter} />
-                <ReadingHoursChart filter={filter} />
-                <ReasonChart filter={filter} />
-                <ReferralChart filter={filter} />
-                <CategoryChart filter={filter} />
-                <ContinentChart filter={filter} />
-                <CountryChart filter={filter} />
-                <TimezoneChart filter={filter} />
-                <PlatformChart filter={filter} />
+                <AnalyticsGrid filter={filter} dateRange={dateRange} />
             </div>
         </div>
     );

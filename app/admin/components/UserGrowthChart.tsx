@@ -135,7 +135,7 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
                 page++;
 
                 // Safety break to prevent infinite loops if DB is huge (e.g. stop at 50k)
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     console.warn('Reached safety limit of 50k profiles');
                     hasMore = false;
                 }

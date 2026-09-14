@@ -61,7 +61,7 @@ export default function ReasonChart({ filter }: { filter?: 'all' | 'true' | 'fal
                 page++;
 
                 // Safety break
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     hasMore = false;
                 }
             }

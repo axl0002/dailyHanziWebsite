@@ -59,7 +59,7 @@ export default function PlatformChart({ filter }: { filter?: 'all' | 'true' | 'f
 
                 page++;
 
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     hasMore = false;
                 }
             }

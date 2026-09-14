@@ -154,7 +154,7 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
                 }
 
                 page++;
-                if (allProfiles.length > 50000) {
+                if (allProfiles.length > 500000) {
                     console.warn('Reached safety limit of 50k profiles');
                     hasMore = false;
                 }

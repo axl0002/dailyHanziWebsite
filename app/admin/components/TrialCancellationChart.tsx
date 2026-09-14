@@ -143,7 +143,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                         hasMore = false;
                     }
                     page++;
-                    if (out.length > 50000) hasMore = false;
+                    if (out.length > 500000) hasMore = false;
                 }
                 return out;
             };

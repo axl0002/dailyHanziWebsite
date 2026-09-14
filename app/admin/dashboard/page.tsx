@@ -3,29 +3,24 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
-import ReferralChart from "../components/ReferralChart";
 import UserGrowthChart from "../components/UserGrowthChart";
 import HourlyGrowthChart from "../components/HourlyGrowthChart";
 import HourlyCancellationChart from "../components/HourlyCancellationChart";
 import CancellationByDayChart from "../components/CancellationByDayChart";
-import ReadingHoursChart from "../components/ReadingHoursChart";
-import HSKLevelChart from "../components/HSKLevelChart";
-import ReasonChart from "../components/ReasonChart";
-import TimezoneChart from "../components/TimezoneChart";
-import ContinentChart from "../components/ContinentChart";
-import CountryChart from "../components/CountryChart";
-import CategoryChart from "../components/CategoryChart";
 import ProUserPercentageChart from "../components/ProUserPercentageChart";
 import ReferralByDayChart from "../components/ReferralByDayChart";
 import PlatformByDayChart from "../components/PlatformByDayChart";
-import PlatformChart from "../components/PlatformChart";
 import TimezoneByDayChart from "../components/TimezoneByDayChart";
 import TrialCancellationChart from "../components/TrialCancellationChart";
 import TrialCancellationRateOverTimeChart from "../components/TrialCancellationRateOverTimeChart";
+import AnalyticsGrid from "../components/AnalyticsGrid";
 import { useDateLabels } from "../components/useDateLabels";
+
+type DateRange = 'all' | '30d' | '7d';
 
 export default function AdminDashboard() {
     const [filter, setFilter] = useState<'all' | 'true' | 'false'>('all');
+    const [dateRange, setDateRange] = useState<DateRange>('all');
     const [userCount, setUserCount] = useState<number | null>(null);
     const { labels, addLabel, deleteLabel } = useDateLabels();
 
@@ -127,15 +122,42 @@ export default function AdminDashboard() {
                 <div className="col-span-1 md:col-span-2">
                     <TrialCancellationChart />
                 </div>
-                <ReadingHoursChart filter={filter} />
-                <HSKLevelChart filter={filter} />
-                <ReasonChart filter={filter} />
-                <ReferralChart filter={filter} />
-                <CategoryChart filter={filter} />
-                <ContinentChart filter={filter} />
-                <CountryChart filter={filter} />
-                <TimezoneChart filter={filter} />
-                <PlatformChart filter={filter} />
+            </div>
+
+            {/* Analytics section — mirrored from /admin/analytics so admins get
+                everything in one view. Uses its own date-range control since
+                the analytics charts support time filters that the revenue
+                charts above don't. */}
+            <div className="mt-10 pt-8 border-t border-gray-200">
+                <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-gray-900">Analytics</h2>
+                        <p className="text-gray-600 mt-1 text-sm">Non-revenue user analytics — profile characteristics, content engagement, and geography.</p>
+                    </div>
+                    <div className="bg-white p-1 rounded-lg border border-gray-200 flex shadow-sm">
+                        <button
+                            onClick={() => setDateRange('all')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${dateRange === 'all' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:text-gray-900'}`}
+                        >
+                            All time
+                        </button>
+                        <button
+                            onClick={() => setDateRange('30d')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${dateRange === '30d' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:text-gray-900'}`}
+                        >
+                            Last 30d
+                        </button>
+                        <button
+                            onClick={() => setDateRange('7d')}
+                            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${dateRange === '7d' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:text-gray-900'}`}
+                        >
+                            Last 7d
+                        </button>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <AnalyticsGrid filter={filter} dateRange={dateRange} />
+                </div>
             </div>
         </div>
     );
