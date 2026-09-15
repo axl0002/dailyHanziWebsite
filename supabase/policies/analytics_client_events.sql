@@ -11,6 +11,13 @@
 -- users using this feature" — non-installers, non-tappers show up as the
 -- 'None' / '0' bucket, denominator = all non-beta profiles.
 
+-- Supporting index. Without this the pool count SELECT does a Seq Scan over
+-- all 197k profile rows (~2s cold) which trips the 8s authenticated
+-- statement_timeout when the whole analytics grid loads at once. Index-only
+-- scan drops it to ~50ms warm / ~600ms cold.
+create index if not exists profiles_is_beta_is_pro_idx
+    on public.profiles (is_beta, is_pro);
+
 drop function if exists public.widget_install_stats(timestamptz);
 drop function if exists public.widget_tap_stats(timestamptz);
 drop function if exists public.notification_tap_stats(timestamptz);
@@ -38,6 +45,9 @@ begin
     -- since_date is deliberately unused here; keep the arg so the client
     -- signature matches the sibling RPCs.
     perform since_date;
+    -- Two disjoint aggregations then subtract, so we never group-by 200k profile
+    -- rows. Only touches profiles (a) once for the pool total, (b) once per
+    -- widget-event user for is_pro lookup (indexed pkey).
     with events as (
         select
             ce.user_id,
@@ -55,25 +65,50 @@ begin
     ),
     per_user as (
         select
-            p.id as user_id,
-            p.is_pro,
-            bool_or(l.surface = 'home' and l.event = 'widget_installed') as has_home,
-            bool_or(l.surface = 'lock' and l.event = 'widget_installed') as has_lock
-        from public.profiles p
-        left join latest l on l.user_id = p.id
-        where p.is_beta = false
-        group by p.id, p.is_pro
+            user_id,
+            bool_or(surface = 'home' and event = 'widget_installed') as has_home,
+            bool_or(surface = 'lock' and event = 'widget_installed') as has_lock
+        from latest
+        group by user_id
     ),
-    bucketed as (
+    installed as (
         select
-            is_pro,
+            p.is_pro,
             case
-                when has_home and has_lock then 'Both'
-                when has_home then 'Home only'
-                when has_lock then 'Lock only'
-                else 'None'
+                when u.has_home and u.has_lock then 'Both'
+                when u.has_home then 'Home only'
+                when u.has_lock then 'Lock only'
+                else null
             end as bucket
-        from per_user
+        from per_user u
+        join public.profiles p on p.id = u.user_id
+        where p.is_beta = false
+    ),
+    installed_counts as (
+        select
+            bucket,
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from installed
+        where bucket is not null
+        group by bucket
+    ),
+    pool as (
+        select
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from public.profiles
+        where is_beta = false
+    ),
+    none_row as (
+        select
+            'None'::text as bucket,
+            pool.pro - coalesce((select sum(pro) from installed_counts), 0)::bigint as pro,
+            pool.free - coalesce((select sum(free) from installed_counts), 0)::bigint as free,
+            pool.total - coalesce((select sum(total) from installed_counts), 0)::bigint as total
+        from pool
     ),
     all_buckets(bucket, sort_order) as (
         values ('None', 0), ('Lock only', 1), ('Home only', 2), ('Both', 3)
@@ -83,12 +118,15 @@ begin
         select
             ab.bucket,
             ab.sort_order,
-            coalesce(count(b.is_pro) filter (where b.is_pro = true), 0)::bigint as pro,
-            coalesce(count(b.is_pro) filter (where b.is_pro is null or b.is_pro = false), 0)::bigint as free,
-            coalesce(count(*) filter (where b.bucket is not null), 0)::bigint as total
+            coalesce(x.pro, 0)::bigint as pro,
+            coalesce(x.free, 0)::bigint as free,
+            coalesce(x.total, 0)::bigint as total
         from all_buckets ab
-        left join bucketed b on b.bucket = ab.bucket
-        group by ab.bucket, ab.sort_order
+        left join (
+            select bucket, pro, free, total from installed_counts
+            union all
+            select bucket, pro, free, total from none_row
+        ) x on x.bucket = ab.bucket
     ) t;
     return result;
 end;
