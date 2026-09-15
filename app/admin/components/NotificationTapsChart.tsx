@@ -1,77 +1,39 @@
 "use client";
 
-import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { useRpcData, sinceFromDateRange } from './useRpcData';
+import { ChartLoading, ChartError, ChartEmpty, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type DateRange = 'all' | '30d' | '7d';
 type ProFilter = 'all' | 'true' | 'false';
 
 type Row = { type: string; pro: number; free: number; total: number };
 
+const parseRow = (r: unknown): Row => {
+    const x = r as { type: string; pro: number | string; free: number | string; total: number | string };
+    return {
+        type: x.type,
+        pro: typeof x.pro === 'string' ? parseInt(x.pro, 10) : (x.pro ?? 0),
+        free: typeof x.free === 'string' ? parseInt(x.free, 10) : (x.free ?? 0),
+        total: typeof x.total === 'string' ? parseInt(x.total, 10) : (x.total ?? 0),
+    };
+};
+
 // Distinct Pro users who tapped ≥1 notification of each type in the window,
 // plus a synthetic "None (never tapped)" row for users who tapped no
 // notifications at all. Bars for the real types overlap (a user can tap
 // multiple types); the None row is disjoint from all of them.
 export default function NotificationTapsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const [data, setData] = useState<Row[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            setError(null);
-            const since = dateRange === '7d'
-                ? new Date(Date.now() - 7 * 86400_000).toISOString()
-                : dateRange === '30d'
-                    ? new Date(Date.now() - 30 * 86400_000).toISOString()
-                    : null;
-            const { data: raw, error: rpcErr } = await supabase.rpc('notification_tap_stats', { since_date: since });
-            if (rpcErr) {
-                console.error('notification_tap_stats:', rpcErr);
-                setError(rpcErr.message ?? 'RPC failed');
-                setLoading(false);
-                return;
-            }
-            const arr = Array.isArray(raw) ? raw : [];
-            const rows: Row[] = (arr as { type: string; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
-                type: r.type,
-                pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : (r.pro ?? 0),
-                free: typeof r.free === 'string' ? parseInt(r.free, 10) : (r.free ?? 0),
-                total: typeof r.total === 'string' ? parseInt(r.total, 10) : (r.total ?? 0),
-            }));
-            setData(rows);
-            setLoading(false);
-        };
-        fetchData();
-    }, [dateRange]);
-
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
+    const { data, loading, error, retry } = useRpcData(
+        'notification_tap_stats',
+        { since_date: sinceFromDateRange(dateRange) },
+        parseRow,
     );
 
-    if (error) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-red-600 font-medium">Failed to load Notification Taps</p>
-            <p className="text-xs text-gray-500 mt-1">{error}</p>
-        </div>
-    );
-
-    if (filter === 'false') return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">Notification Taps by Type</p>
-            <p className="text-xs text-gray-400 mt-1">Pro feature — no data to show for Free users.</p>
-        </div>
-    );
-
-    if (data.length === 0) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Pro users found</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Notification Taps" error={error} onRetry={retry} />;
+    if (filter === 'false') return <ChartProOnlyPlaceholder title="Notification Taps by Type" />;
+    if (data.length === 0) return <ChartEmpty title="No Pro users found" />;
 
     const rangeLabel = dateRange === 'all' ? 'all time' : dateRange === '30d' ? 'last 30 days' : 'last 7 days';
 

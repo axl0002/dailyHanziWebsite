@@ -1,66 +1,39 @@
 "use client";
 
-import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { supabase } from '@/lib/supabase';
+import { useRpcData } from './useRpcData';
+import { ChartLoading, ChartError, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type DateRange = 'all' | '30d' | '7d';
 type ProFilter = 'all' | 'true' | 'false';
 
 type Row = { bucket: string; sort_order: number; pro: number; free: number; total: number };
 
+const parseRow = (r: unknown): Row => {
+    const x = r as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string };
+    return {
+        bucket: x.bucket,
+        sort_order: x.sort_order,
+        pro: typeof x.pro === 'string' ? parseInt(x.pro, 10) : (x.pro ?? 0),
+        free: typeof x.free === 'string' ? parseInt(x.free, 10) : (x.free ?? 0),
+        total: typeof x.total === 'string' ? parseInt(x.total, 10) : (x.total ?? 0),
+    };
+};
+
 // Adoption breakdown across all non-beta Pro users, mutually exclusive:
-// {None, Home only, Lock only, Both}. Since_date is intentionally not
-// applied — adoption is a current-state metric, not windowed.
+// {None, Home only, Lock only, Both}. since_date is intentionally not passed —
+// adoption is a current-state metric, not windowed. The dateRange prop is
+// accepted for signature parity with the other post-paywall charts.
 export default function WidgetInstallsChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const [data, setData] = useState<Row[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            setError(null);
-            const { data: raw, error: rpcErr } = await supabase.rpc('widget_install_stats', { since_date: null });
-            if (rpcErr) {
-                console.error('widget_install_stats:', rpcErr);
-                setError(rpcErr.message ?? 'RPC failed');
-                setLoading(false);
-                return;
-            }
-            const arr = Array.isArray(raw) ? raw : [];
-            const rows: Row[] = (arr as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
-                bucket: r.bucket,
-                sort_order: r.sort_order,
-                pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : (r.pro ?? 0),
-                free: typeof r.free === 'string' ? parseInt(r.free, 10) : (r.free ?? 0),
-                total: typeof r.total === 'string' ? parseInt(r.total, 10) : (r.total ?? 0),
-            }));
-            setData(rows);
-            setLoading(false);
-        };
-        fetchData();
-    }, []);
-
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
+    const { data, loading, error, retry } = useRpcData(
+        'widget_install_stats',
+        { since_date: null },
+        parseRow,
     );
 
-    if (error) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-red-600 font-medium">Failed to load Widget Installs</p>
-            <p className="text-xs text-gray-500 mt-1">{error}</p>
-        </div>
-    );
-
-    if (filter === 'false') return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">Widget Installs</p>
-            <p className="text-xs text-gray-400 mt-1">Pro feature — no data to show for Free users.</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Widget Installs" error={error} onRetry={retry} />;
+    if (filter === 'false') return <ChartProOnlyPlaceholder title="Widget Installs" />;
 
     const poolTotal = data.reduce((s, r) => s + r.pro, 0);
     const installedUsers = data.filter(r => r.bucket !== 'None').reduce((s, r) => s + r.pro, 0);
