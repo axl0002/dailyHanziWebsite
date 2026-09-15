@@ -9,9 +9,10 @@ type ProFilter = 'all' | 'true' | 'false';
 
 type Row = { type: string; pro: number; free: number; total: number };
 
-// Total notification_tapped events grouped by props.type — one bar per push
-// notification category so we can see which types drive re-engagement.
-// The client isn't emitting these yet; will render an empty state until it does.
+// Distinct Pro users who tapped ≥1 notification of each type in the window,
+// plus a synthetic "None (never tapped)" row for users who tapped no
+// notifications at all. Bars for the real types overlap (a user can tap
+// multiple types); the None row is disjoint from all of them.
 export default function NotificationTapsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const [data, setData] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
@@ -66,20 +67,19 @@ export default function NotificationTapsChart({ filter = 'all', dateRange = 'all
         </div>
     );
 
-    if (data.length === 0 || data.every(d => d.pro === 0)) return (
+    if (data.length === 0) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Notification Tap data yet</p>
-            <p className="text-xs text-gray-400 mt-1">Waiting on the client to emit notification_tapped events.</p>
+            <p className="text-gray-500 font-medium">No Pro users found</p>
         </div>
     );
 
-    const poolTotal = data.reduce((s, r) => s + r.pro, 0);
+    const rangeLabel = dateRange === 'all' ? 'all time' : dateRange === '30d' ? 'last 30 days' : 'last 7 days';
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Notification Taps by Type</h3>
-                <p className="text-xs text-gray-500 mt-1">Total notification_tapped events from Pro users, grouped by props.type.</p>
+                <h3 className="text-lg font-bold text-gray-900">Notification Taps by Type ({rangeLabel})</h3>
+                <p className="text-xs text-gray-500 mt-1">Distinct Pro users who tapped each type. Type bars overlap (users can tap multiple); the &quot;None&quot; row is disjoint.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -99,7 +99,7 @@ export default function NotificationTapsChart({ filter = 'all', dateRange = 'all
                         <YAxis
                             type="category"
                             dataKey="type"
-                            width={140}
+                            width={160}
                             tick={{ fontSize: 11, fill: '#6B7280' }}
                             tickLine={false}
                             axisLine={false}
@@ -110,7 +110,6 @@ export default function NotificationTapsChart({ filter = 'all', dateRange = 'all
                             content={({ active, payload, label }) => {
                                 if (active && payload && payload.length) {
                                     const value = payload[0].value as number;
-                                    const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
                                     return (
                                         <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[150px]">
                                             <p className="font-semibold text-gray-900 mb-2">{label}</p>
@@ -119,7 +118,7 @@ export default function NotificationTapsChart({ filter = 'all', dateRange = 'all
                                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#6366F1' }} />
                                                     <span className="text-sm font-medium text-indigo-600">Pro Users</span>
                                                 </div>
-                                                <span className="text-sm font-bold text-indigo-600">{value} ({percentage}%)</span>
+                                                <span className="text-sm font-bold text-indigo-600">{value.toLocaleString()}</span>
                                             </div>
                                         </div>
                                     );

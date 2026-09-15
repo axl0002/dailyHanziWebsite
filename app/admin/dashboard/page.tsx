@@ -21,7 +21,7 @@ type DateRange = 'all' | '30d' | '7d';
 
 export default function AdminDashboard() {
     const [filter, setFilter] = useState<'all' | 'true' | 'false'>('all');
-    const [dateRange, setDateRange] = useState<DateRange>('all');
+    const [dateRange, setDateRange] = useState<DateRange>('30d');
     const [userCount, setUserCount] = useState<number | null>(null);
     const { labels, addLabel, deleteLabel } = useDateLabels();
 

@@ -7,16 +7,11 @@ import { supabase } from '@/lib/supabase';
 type DateRange = 'all' | '30d' | '7d';
 type ProFilter = 'all' | 'true' | 'false';
 
-type Row = { surface: string; pro: number; free: number; total: number };
+type Row = { bucket: string; sort_order: number; pro: number; free: number; total: number };
 
-const SURFACE_LABELS: Record<string, string> = {
-    home: 'Home',
-    lock: 'Lock',
-    unknown: 'Unknown',
-};
-
-// Total widget_tapped events per surface. Same-user repeat taps count
-// separately — this is engagement volume, not reach.
+// Histogram of Pro users bucketed by widget_tapped count in the window.
+// The 0-bucket includes everyone who never taps — the point of the chart
+// is to compare "using the feature" vs "not using it".
 export default function WidgetTapsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const [data, setData] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
@@ -39,8 +34,9 @@ export default function WidgetTapsChart({ filter = 'all', dateRange = 'all' }: {
                 return;
             }
             const arr = Array.isArray(raw) ? raw : [];
-            const rows: Row[] = (arr as { surface: string; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
-                surface: SURFACE_LABELS[r.surface] ?? r.surface,
+            const rows: Row[] = (arr as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
+                bucket: r.bucket,
+                sort_order: r.sort_order,
                 pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : (r.pro ?? 0),
                 free: typeof r.free === 'string' ? parseInt(r.free, 10) : (r.free ?? 0),
                 total: typeof r.total === 'string' ? parseInt(r.total, 10) : (r.total ?? 0),
@@ -71,25 +67,24 @@ export default function WidgetTapsChart({ filter = 'all', dateRange = 'all' }: {
         </div>
     );
 
-    if (data.length === 0 || data.every(d => d.pro === 0)) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Widget Tap data available</p>
-        </div>
-    );
-
     const poolTotal = data.reduce((s, r) => s + r.pro, 0);
+    const tappers = data.filter(r => r.bucket !== '0').reduce((s, r) => s + r.pro, 0);
+    const rangeLabel = dateRange === 'all' ? 'all time' : dateRange === '30d' ? 'last 30 days' : 'last 7 days';
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Widget Taps</h3>
-                <p className="text-xs text-gray-500 mt-1">Total widget_tapped events from Pro users, per surface. Repeat taps by the same user each count.</p>
+                <div className="flex items-baseline justify-between">
+                    <h3 className="text-lg font-bold text-gray-900">Widget Taps per User</h3>
+                    <span className="text-xs text-gray-500">{tappers.toLocaleString()} of {poolTotal.toLocaleString()} Pro users tapped ≥1 ({rangeLabel})</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Distribution of widget_tapped events per user. The 0 bucket = users who never tap.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis dataKey="surface" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                         <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
@@ -99,7 +94,7 @@ export default function WidgetTapsChart({ filter = 'all', dateRange = 'all' }: {
                                     const percentage = poolTotal > 0 ? ((value / poolTotal) * 100).toFixed(1) : '0.0';
                                     return (
                                         <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-xl min-w-[150px]">
-                                            <p className="font-semibold text-gray-900 mb-2">{label}</p>
+                                            <p className="font-semibold text-gray-900 mb-2">{label} taps</p>
                                             <div className="flex items-center justify-between gap-4 mb-1">
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#6366F1' }} />

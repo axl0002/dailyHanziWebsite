@@ -51,7 +51,7 @@ export default function DailySentenceCountChart({ filter, dateRange = 'all' }: {
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <div className="mb-6">
                 <h3 className="text-lg font-bold text-gray-900">Daily Sentence Count</h3>
-                <p className="text-xs text-gray-500 mt-1">Pro-only setting — Free users are locked to 1/day.</p>
+                <p className="text-xs text-gray-500 mt-1">Pro-only setting — Defaults to 3/day.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">

@@ -7,18 +7,12 @@ import { supabase } from '@/lib/supabase';
 type DateRange = 'all' | '30d' | '7d';
 type ProFilter = 'all' | 'true' | 'false';
 
-type Row = { surface: string; pro: number; free: number; total: number };
+type Row = { bucket: string; sort_order: number; pro: number; free: number; total: number };
 
-const SURFACE_LABELS: Record<string, string> = {
-    home: 'Home',
-    lock: 'Lock',
-    unknown: 'Unknown',
-};
-
-// Distinct Pro users currently having a widget installed, per surface (home/lock).
-// Backed by widget_install_stats RPC — "currently installed" = latest
-// install/remove event for the (user, surface) pair is an install.
-export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+// Adoption breakdown across all non-beta Pro users, mutually exclusive:
+// {None, Home only, Lock only, Both}. Since_date is intentionally not
+// applied — adoption is a current-state metric, not windowed.
+export default function WidgetInstallsChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const [data, setData] = useState<Row[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -27,12 +21,7 @@ export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' 
         const fetchData = async () => {
             setLoading(true);
             setError(null);
-            const since = dateRange === '7d'
-                ? new Date(Date.now() - 7 * 86400_000).toISOString()
-                : dateRange === '30d'
-                    ? new Date(Date.now() - 30 * 86400_000).toISOString()
-                    : null;
-            const { data: raw, error: rpcErr } = await supabase.rpc('widget_install_stats', { since_date: since });
+            const { data: raw, error: rpcErr } = await supabase.rpc('widget_install_stats', { since_date: null });
             if (rpcErr) {
                 console.error('widget_install_stats:', rpcErr);
                 setError(rpcErr.message ?? 'RPC failed');
@@ -40,8 +29,9 @@ export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' 
                 return;
             }
             const arr = Array.isArray(raw) ? raw : [];
-            const rows: Row[] = (arr as { surface: string; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
-                surface: SURFACE_LABELS[r.surface] ?? r.surface,
+            const rows: Row[] = (arr as { bucket: string; sort_order: number; pro: number | string; free: number | string; total: number | string }[]).map(r => ({
+                bucket: r.bucket,
+                sort_order: r.sort_order,
                 pro: typeof r.pro === 'string' ? parseInt(r.pro, 10) : (r.pro ?? 0),
                 free: typeof r.free === 'string' ? parseInt(r.free, 10) : (r.free ?? 0),
                 total: typeof r.total === 'string' ? parseInt(r.total, 10) : (r.total ?? 0),
@@ -50,7 +40,7 @@ export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' 
             setLoading(false);
         };
         fetchData();
-    }, [dateRange]);
+    }, []);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
@@ -72,25 +62,23 @@ export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' 
         </div>
     );
 
-    if (data.length === 0 || data.every(d => d.pro === 0)) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Widget Install data available</p>
-        </div>
-    );
-
     const poolTotal = data.reduce((s, r) => s + r.pro, 0);
+    const installedUsers = data.filter(r => r.bucket !== 'None').reduce((s, r) => s + r.pro, 0);
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Widget Installs</h3>
-                <p className="text-xs text-gray-500 mt-1">Distinct Pro users currently having the widget installed, per surface. Uninstalls decrement the count.</p>
+                <div className="flex items-baseline justify-between">
+                    <h3 className="text-lg font-bold text-gray-900">Widget Installs</h3>
+                    <span className="text-xs text-gray-500">{installedUsers.toLocaleString()} of {poolTotal.toLocaleString()} Pro users have ≥1 widget installed</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Mutually exclusive buckets — current state, not windowed. Uninstalls decrement.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis dataKey="surface" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
+                        <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                         <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} allowDecimals={false} />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}

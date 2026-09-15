@@ -12,7 +12,7 @@ type DateRange = 'all' | '30d' | '7d';
 // /admin/dashboard which is admin-only in middleware.ts.
 export default function AnalyticsPage() {
     const [filter, setFilter] = useState<ProFilter>('all');
-    const [dateRange, setDateRange] = useState<DateRange>('all');
+    const [dateRange, setDateRange] = useState<DateRange>('30d');
 
     return (
         <ProfilesCacheProvider>
