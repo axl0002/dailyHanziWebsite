@@ -19,6 +19,7 @@ create index if not exists profiles_is_beta_is_pro_idx
     on public.profiles (is_beta, is_pro);
 
 drop function if exists public.widget_install_stats(timestamptz);
+drop function if exists public.widget_install_breakdown(timestamptz);
 drop function if exists public.widget_tap_stats(timestamptz);
 drop function if exists public.notification_tap_stats(timestamptz);
 
@@ -134,6 +135,70 @@ $$;
 
 revoke all on function public.widget_install_stats(timestamptz) from public;
 grant execute on function public.widget_install_stats(timestamptz) to authenticated;
+
+
+-- Widget install breakdown by (widget type, surface). Same currently-installed
+-- semantics as widget_install_stats — latest install/remove for the tuple
+-- must be an install. The widget name is normalized (lowercase, strip a
+-- trailing "Widget" suffix) so early-version "CharacterWidget" collapses
+-- with later "character" and we get one row per real widget kind.
+-- since_date is ignored — this is current state, not a windowed metric.
+create or replace function public.widget_install_breakdown(
+    since_date timestamptz default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+stable
+as $$
+declare
+    result jsonb;
+begin
+    if not public.is_staff() then
+        raise exception 'not authorized';
+    end if;
+    perform since_date;
+    with events as (
+        select
+            ce.user_id,
+            lower(regexp_replace(coalesce(ce.props->>'widget', 'unknown'), 'Widget$', '', 'i')) as widget,
+            coalesce(ce.props->>'surface', 'unknown') as surface,
+            ce.event,
+            ce.created_at
+        from public.client_events ce
+        where ce.event in ('widget_installed', 'widget_removed')
+    ),
+    latest as (
+        select distinct on (user_id, widget, surface)
+            user_id, widget, surface, event
+        from events
+        order by user_id, widget, surface, created_at desc
+    ),
+    installed as (
+        select l.widget, l.surface, p.is_pro
+        from latest l
+        join public.profiles p on p.id = l.user_id
+        where l.event = 'widget_installed'
+          and p.is_beta = false
+    )
+    select coalesce(jsonb_agg(row_to_json(t) order by t.widget, t.surface), '[]'::jsonb) into result
+    from (
+        select
+            widget,
+            surface,
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from installed
+        group by widget, surface
+    ) t;
+    return result;
+end;
+$$;
+
+revoke all on function public.widget_install_breakdown(timestamptz) from public;
+grant execute on function public.widget_install_breakdown(timestamptz) to authenticated;
 
 
 -- Histogram of non-beta profiles bucketed by how many widget_tapped events

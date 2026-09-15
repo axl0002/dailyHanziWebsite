@@ -20,6 +20,7 @@ import SavedCharactersChart from './SavedCharactersChart';
 import LearnedCharactersChart from './LearnedCharactersChart';
 import InReviewCharactersChart from './InReviewCharactersChart';
 import WidgetInstallsChart from './WidgetInstallsChart';
+import WidgetInstallBreakdownChart from './WidgetInstallBreakdownChart';
 import WidgetTapsChart from './WidgetTapsChart';
 import NotificationTapsChart from './NotificationTapsChart';
 
@@ -78,6 +79,7 @@ export default function AnalyticsGrid({ filter, dateRange }: { filter: ProFilter
             <LearnedCharactersChart filter={filter} dateRange={dateRange} />
             <InReviewCharactersChart filter={filter} dateRange={dateRange} />
             <WidgetInstallsChart filter={filter} dateRange={dateRange} />
+            <WidgetInstallBreakdownChart filter={filter} dateRange={dateRange} />
             <WidgetTapsChart filter={filter} dateRange={dateRange} />
             <NotificationTapsChart filter={filter} dateRange={dateRange} />
         </>
