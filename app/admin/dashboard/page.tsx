@@ -157,7 +157,7 @@ export default function AdminDashboard() {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <ProfilesCacheProvider>
+                    <ProfilesCacheProvider dateRange={dateRange}>
                         <AnalyticsGrid filter={filter} dateRange={dateRange} />
                     </ProfilesCacheProvider>
                 </div>

@@ -2,88 +2,39 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, pivotDist, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty } from './ChartMessage';
 
-type ChartData = {
-    name: string;
-    pro: number;
-    free: number;
-    total: number;
-};
+type ChartData = { name: string; pro: number; free: number; total: number };
 
-export default function HSKLevelChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function HSKLevelChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartData[] = useMemo(() => {
-        const rows = filterProfiles(profiles, filter, dateRange);
-        const levelCounts: Record<string, { pro: number; free: number }> = {};
-
-        for (const profile of rows) {
-            const level = profile.hsk_level;
-            if (level !== null && level !== undefined) {
-                const key = `HSK ${level}`;
-                if (!levelCounts[key]) {
-                    levelCounts[key] = { pro: 0, free: 0 };
-                }
-
-                if (profile.is_pro) {
-                    levelCounts[key].pro++;
-                } else {
-                    levelCounts[key].free++;
-                }
-            }
-        }
-
-        // Convert to array and sort by name (HSK 1, HSK 2, etc.)
-        return Object.entries(levelCounts)
-            .map(([name, counts]) => ({
-                name,
-                pro: counts.pro,
-                free: counts.free,
-                total: counts.pro + counts.free
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    }, [profiles, filter, dateRange]);
+        const rows = pivotDist(distributions?.hsk_level, {
+            keyLabel: (k) => `HSK ${k}`,
+        });
+        // Sort by HSK number, not by total
+        return rows.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    }, [distributions]);
 
     const poolTotal = useMemo(() => {
-        return data.reduce((s, r) => {
-            return s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total);
-        }, 0);
+        return data.reduce((s, r) => s + (filter === 'true' ? r.pro : filter === 'false' ? r.free : r.total), 0);
     }, [data, filter]);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (data.length === 0) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No HSK Level data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="HSK Level" error={error} onRetry={retry} />;
+    if (data.length === 0) return <ChartEmpty title="No HSK Level data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <h3 className="text-lg font-bold mb-6 text-gray-900">HSK Level</h3>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                        data={data}
-                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                    >
+                    <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                        <XAxis
-                            dataKey="name"
-                            tick={{ fontSize: 11, fill: '#6B7280' }}
-                            tickLine={false}
-                            axisLine={false}
-                        />
-                        <YAxis
-                            tick={{ fontSize: 11, fill: '#6B7280' }}
-                            tickLine={false}
-                            axisLine={false}
-                        />
+                        <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} tickLine={false} axisLine={false} />
                         <Tooltip
                             cursor={{ fill: '#F9FAFB' }}
                             content={({ active, payload, label }) => {
@@ -98,21 +49,13 @@ export default function HSKLevelChart({ filter, dateRange = 'all' }: { filter?: 
                                                 const bucketTotal = (entry.payload as { total: number }).total;
                                                 const denominator = filter === 'all' ? bucketTotal : poolTotal;
                                                 const percentage = denominator > 0 ? ((value / denominator) * 100).toFixed(1) : '0.0';
-
                                                 return (
                                                     <div key={index} className="flex items-center justify-between gap-4 mb-1">
                                                         <div className="flex items-center gap-2">
-                                                            <div
-                                                                className="w-2 h-2 rounded-full"
-                                                                style={{ backgroundColor: entry.color }}
-                                                            />
-                                                            <span className={`text-sm font-medium ${colorClass}`}>
-                                                                {entry.name}
-                                                            </span>
+                                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                                                            <span className={`text-sm font-medium ${colorClass}`}>{entry.name}</span>
                                                         </div>
-                                                        <span className={`text-sm font-bold ${colorClass}`}>
-                                                            {value} ({percentage}%)
-                                                        </span>
+                                                        <span className={`text-sm font-bold ${colorClass}`}>{value} ({percentage}%)</span>
                                                     </div>
                                                 );
                                             })}

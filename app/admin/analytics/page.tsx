@@ -15,7 +15,7 @@ export default function AnalyticsPage() {
     const [dateRange, setDateRange] = useState<DateRange>('30d');
 
     return (
-        <ProfilesCacheProvider>
+        <ProfilesCacheProvider dateRange={dateRange}>
         <div className="p-6">
             <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>

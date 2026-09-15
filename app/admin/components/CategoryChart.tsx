@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, pivotDist, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty } from './ChartMessage';
 
 type ChartData = {
     name: string;
@@ -11,55 +12,14 @@ type ChartData = {
     total: number;
 };
 
-export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function CategoryChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartData[] = useMemo(() => {
-        const rows = filterProfiles(profiles, filter, dateRange);
-        const categoryCounts: Record<string, { pro: number; free: number }> = {};
-
-        for (const profile of rows) {
-            const categories = profile.selected_categories;
-
-            if (categories) {
-                let catArray: string[] = [];
-
-                if (Array.isArray(categories)) {
-                    catArray = categories;
-                } else if (typeof categories === 'string') {
-                    // Handle comma-separated string just in case
-                    catArray = (categories as string).split(',').map((s: string) => s.trim());
-                }
-
-                catArray.forEach(cat => {
-                    if (cat) {
-                        const key = cat.trim();
-                        if (key) {
-                            if (!categoryCounts[key]) {
-                                categoryCounts[key] = { pro: 0, free: 0 };
-                            }
-
-                            if (profile.is_pro) {
-                                categoryCounts[key].pro++;
-                            } else {
-                                categoryCounts[key].free++;
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
-        // Convert to array and sort by total descending
-        return Object.entries(categoryCounts)
-            .map(([name, counts]) => ({
-                name,
-                pro: counts.pro,
-                free: counts.free,
-                total: counts.pro + counts.free
-            }))
-            .sort((a, b) => b.total - a.total);
-    }, [profiles, filter, dateRange]);
+        // Server already unnested selected_categories, so this is a flat list.
+        const rows = pivotDist(distributions?.category);
+        return rows.filter(r => r.name);
+    }, [distributions]);
 
     const poolTotal = useMemo(() => {
         return data.reduce((s, r) => {
@@ -72,17 +32,9 @@ export default function CategoryChart({ filter, dateRange = 'all' }: { filter?: 
     // filtered results from looking cramped.
     const chartHeight = Math.max(300, data.length * 28 + 60);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (data.length === 0) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Category data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Selected Categories" error={error} onRetry={retry} />;
+    if (data.length === 0) return <ChartEmpty title="No Category data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">

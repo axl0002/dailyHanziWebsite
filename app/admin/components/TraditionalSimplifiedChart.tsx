@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, pivotDist, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty } from './ChartMessage';
 
 type ChartRow = {
     name: string;
@@ -13,29 +14,25 @@ type ChartRow = {
 
 // profiles.use_traditional: false = simplified (the default), true = traditional.
 // Very lopsided in practice (~99% simplified) but useful to track adoption.
-export default function TraditionalSimplifiedChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function TraditionalSimplifiedChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartRow[] = useMemo(() => {
-        const rows = filterProfiles(profiles, filter, dateRange);
-        const counts: Record<string, { pro: number; free: number }> = {
-            Simplified: { pro: 0, free: 0 },
-            Traditional: { pro: 0, free: 0 },
+        const rows = pivotDist(distributions?.use_traditional, {
+            keyLabel: (k) => k ? 'Traditional' : 'Simplified',
+        });
+        // Ensure both buckets always render in a stable order
+        const bySide: Record<string, ChartRow> = {
+            Simplified: { name: 'Simplified', pro: 0, free: 0, total: 0 },
+            Traditional: { name: 'Traditional', pro: 0, free: 0, total: 0 },
         };
-
         for (const r of rows) {
-            const key = r.use_traditional ? 'Traditional' : 'Simplified';
-            if (r.is_pro) counts[key].pro += 1;
-            else counts[key].free += 1;
+            if (bySide[r.name]) {
+                bySide[r.name] = { name: r.name, pro: r.pro, free: r.free, total: r.total };
+            }
         }
-
-        return (['Simplified', 'Traditional'] as const).map(name => ({
-            name,
-            pro: counts[name].pro,
-            free: counts[name].free,
-            total: counts[name].pro + counts[name].free,
-        }));
-    }, [profiles, filter, dateRange]);
+        return [bySide.Simplified, bySide.Traditional];
+    }, [distributions]);
 
     const poolTotal = useMemo(() => {
         return data.reduce((s, r) => {
@@ -43,17 +40,9 @@ export default function TraditionalSimplifiedChart({ filter, dateRange = 'all' }
         }, 0);
     }, [data, filter]);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (data.every(d => d.total === 0)) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Simplified/Traditional data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Simplified vs Traditional" error={error} onRetry={retry} />;
+    if (data.every(d => d.total === 0)) return <ChartEmpty title="No Simplified/Traditional data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">

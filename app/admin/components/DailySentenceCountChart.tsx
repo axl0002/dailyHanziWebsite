@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type ChartRow = {
     name: string;
@@ -12,40 +13,25 @@ type ChartRow = {
 // How many sentences the user gets pushed per day. Values live in
 // profiles.daily_sentence_count — 1, 2, or 3. Free users are locked at 1
 // with no way to change it, so we only chart Pro users. When the toolbar
-// filter is set to Free, we render an empty state instead.
-export default function DailySentenceCountChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+// filter is set to Free, we render the Pro-only placeholder.
+export default function DailySentenceCountChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartRow[] = useMemo(() => {
-        const rows = filterProfiles(profiles, 'true', dateRange); // force Pro
         const buckets: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
-        for (const r of rows) {
-            const key = r.daily_sentence_count == null ? null : String(r.daily_sentence_count);
-            if (key && buckets[key] !== undefined) buckets[key] += 1;
+        for (const r of distributions?.daily_sentence_count ?? []) {
+            const key = r.key == null ? null : String(r.key);
+            if (key && buckets[key] !== undefined) buckets[key] += r.n;
         }
         return Object.entries(buckets).map(([name, pro]) => ({ name: `${name}/day`, pro }));
-    }, [profiles, dateRange]);
+    }, [distributions]);
 
     const poolTotal = useMemo(() => data.reduce((s, r) => s + r.pro, 0), [data]);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (filter === 'false') return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">Daily Sentence Count</p>
-            <p className="text-xs text-gray-400 mt-1">Pro feature — no data to show for Free users.</p>
-        </div>
-    );
-
-    if (data.every(d => d.pro === 0)) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Daily Sentence Count data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Daily Sentence Count" error={error} onRetry={retry} />;
+    if (filter === 'false') return <ChartProOnlyPlaceholder title="Daily Sentence Count" />;
+    if (data.every(d => d.pro === 0)) return <ChartEmpty title="No Daily Sentence Count data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">

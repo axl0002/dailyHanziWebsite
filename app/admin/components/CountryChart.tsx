@@ -3,7 +3,8 @@
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getCountryForTimezone } from 'countries-and-timezones';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty } from './ChartMessage';
 
 type ChartData = {
     name: string;
@@ -23,28 +24,22 @@ function timezoneToCountry(tz: string): string | null {
     }
 }
 
-export default function CountryChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function CountryChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartData[] = useMemo(() => {
-        const rows = filterProfiles(profiles, filter, dateRange);
+        // We group by *derived* country, not by raw tz, so bypass pivotDist
+        // and reduce over the raw (tz, is_pro, n) rows directly.
         const countryCounts: Record<string, { pro: number; free: number }> = {};
-
-        for (const profile of rows) {
-            if (!profile.timezone) continue;
-            const country = timezoneToCountry(profile.timezone) ?? 'Unknown';
-
+        for (const row of distributions?.timezone ?? []) {
+            if (!row.key) continue;
+            const country = timezoneToCountry(row.key) ?? 'Unknown';
             if (!countryCounts[country]) {
                 countryCounts[country] = { pro: 0, free: 0 };
             }
-
-            if (profile.is_pro) {
-                countryCounts[country].pro++;
-            } else {
-                countryCounts[country].free++;
-            }
+            if (row.is_pro === true) countryCounts[country].pro += row.n;
+            else countryCounts[country].free += row.n;
         }
-
         return Object.entries(countryCounts)
             .map(([name, counts]) => ({
                 name,
@@ -54,7 +49,7 @@ export default function CountryChart({ filter, dateRange = 'all' }: { filter?: P
             }))
             .sort((a, b) => b.total - a.total)
             .slice(0, 20);
-    }, [profiles, filter, dateRange]);
+    }, [distributions]);
 
     const poolTotal = useMemo(() => {
         return data.reduce((s, r) => {
@@ -67,17 +62,9 @@ export default function CountryChart({ filter, dateRange = 'all' }: { filter?: P
     // filtered results from looking cramped.
     const chartHeight = Math.max(300, data.length * 28 + 60);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (data.length === 0) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Country data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Country" error={error} onRetry={retry} />;
+    if (data.length === 0) return <ChartEmpty title="No Country data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">

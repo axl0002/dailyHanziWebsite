@@ -2,46 +2,32 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type ChartRow = { name: string; pro: number };
 
 // profiles.show_pinyin: whether the user has pinyin annotations turned on.
 // The toggle is Pro-gated, so only Pro users can change it — Free users all
 // sit on the default. Chart shows Pro users only; toolbar Free hides it.
-export default function PinyinEnabledChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function PinyinEnabledChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartRow[] = useMemo(() => {
-        const rows = filterProfiles(profiles, 'true', dateRange); // force Pro
         const counts: Record<string, number> = { 'Pinyin on': 0, 'Pinyin off': 0 };
-        for (const p of rows) {
-            const key = p.show_pinyin ? 'Pinyin on' : 'Pinyin off';
-            counts[key] += 1;
+        for (const r of distributions?.show_pinyin ?? []) {
+            const key = r.key ? 'Pinyin on' : 'Pinyin off';
+            counts[key] += r.n;
         }
         return (['Pinyin on', 'Pinyin off'] as const).map(name => ({ name, pro: counts[name] }));
-    }, [profiles, dateRange]);
+    }, [distributions]);
 
     const poolTotal = useMemo(() => data.reduce((s, r) => s + r.pro, 0), [data]);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (filter === 'false') return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">Pinyin Enabled</p>
-            <p className="text-xs text-gray-400 mt-1">Pro feature — no data to show for Free users.</p>
-        </div>
-    );
-
-    if (data.every(d => d.pro === 0)) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Pinyin Enabled data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Pinyin Enabled" error={error} onRetry={retry} />;
+    if (filter === 'false') return <ChartProOnlyPlaceholder title="Pinyin Enabled" />;
+    if (data.every(d => d.pro === 0)) return <ChartEmpty title="No Pinyin Enabled data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">

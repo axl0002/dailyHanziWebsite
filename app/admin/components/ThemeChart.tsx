@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useProfilesCache, filterProfiles, type ProFilter, type DateRange } from './useProfilesCache';
+import { useProfilesCache, pivotDist, type ProFilter } from './useProfilesCache';
+import { ChartLoading, ChartError, ChartEmpty } from './ChartMessage';
 
 type ChartRow = {
     name: string;
@@ -13,24 +14,13 @@ type ChartRow = {
 
 // UI theme the user picked in-app: classic, dark, nature, ink, plus whatever
 // gets added later. Read from profiles.theme.
-export default function ThemeChart({ filter, dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
-    const { profiles, loading } = useProfilesCache();
+export default function ThemeChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: unknown }) {
+    const { distributions, loading, error, retry } = useProfilesCache();
 
     const data: ChartRow[] = useMemo(() => {
-        const rows = filterProfiles(profiles, filter, dateRange);
-        const counts: Record<string, { pro: number; free: number }> = {};
-
-        for (const r of rows) {
-            const key = r.theme ?? '(none)';
-            if (!counts[key]) counts[key] = { pro: 0, free: 0 };
-            if (r.is_pro) counts[key].pro += 1;
-            else counts[key].free += 1;
-        }
-
-        return Object.entries(counts)
-            .map(([name, c]) => ({ name, pro: c.pro, free: c.free, total: c.pro + c.free }))
-            .sort((a, b) => b.total - a.total);
-    }, [profiles, filter, dateRange]);
+        const rows = pivotDist(distributions?.theme);
+        return rows.filter(r => r.name && r.name !== 'unknown');
+    }, [distributions]);
 
     const poolTotal = useMemo(() => {
         return data.reduce((s, r) => {
@@ -38,17 +28,9 @@ export default function ThemeChart({ filter, dateRange = 'all' }: { filter?: Pro
         }, 0);
     }, [data, filter]);
 
-    if (loading) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center justify-center h-[300px]">
-            <span className="text-gray-400">Loading chart data...</span>
-        </div>
-    );
-
-    if (data.length === 0) return (
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-            <p className="text-gray-500 font-medium">No Theme data available</p>
-        </div>
-    );
+    if (loading) return <ChartLoading />;
+    if (error) return <ChartError title="Theme" error={error} onRetry={retry} />;
+    if (data.length === 0) return <ChartEmpty title="No Theme data available" />;
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
