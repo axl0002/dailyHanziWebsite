@@ -7,8 +7,13 @@
 -- All three follow the exact shape of sentences_read_histogram:
 --   returns jsonb array of {bucket, sort_order, pro, free, total}
 -- and are SECURITY DEFINER + is_staff() gated. jsonb_agg keeps them under
--- PostgREST's 1000-row cap. LEFT JOIN against profiles so users with 0 rows
--- in the source table show up in the '0' bucket.
+-- PostgREST's 1000-row cap.
+--
+-- The '0' bucket is (pool - active) via a single indexed pool count, not a
+-- full LEFT JOIN of profiles into the read set — see the widget_install_stats
+-- comment in analytics_client_events.sql for why (200k-row scan on profiles
+-- with no supporting index used to trip the 8s authenticated timeout when
+-- the whole grid loaded).
 --
 -- Bucket boundaries chosen to cover the observed spread (some Pro users
 -- have thousands of characters at strength=3).
@@ -16,10 +21,6 @@
 drop function if exists public.saved_characters_histogram(timestamptz);
 drop function if exists public.learned_characters_histogram(timestamptz);
 drop function if exists public.in_review_characters_histogram(timestamptz);
-
--- Shared helper: given a per-user count CTE, return the jsonb histogram.
--- Rather than a Postgres function, we inline the case-when block in each
--- function since it's short and lets each function stay independent.
 
 create or replace function public.saved_characters_histogram(
     since_date timestamptz default null
@@ -42,45 +43,61 @@ begin
         where (since_date is null or saved_at >= since_date)
         group by user_id
     ),
-    user_totals as (
-        select coalesce(c.n, 0) as k, p.is_pro
-        from public.profiles p
-        left join counts_per_user c on c.user_id = p.id
-        where p.is_beta = false
-    ),
-    bucketed as (
+    active as (
         select
+            p.is_pro,
             case
-                when k = 0 then '0'
-                when k between 1 and 10 then '1-10'
-                when k between 11 and 50 then '11-50'
-                when k between 51 and 200 then '51-200'
-                when k between 201 and 500 then '201-500'
-                when k between 501 and 1000 then '501-1000'
+                when c.n between 1 and 10 then '1-10'
+                when c.n between 11 and 50 then '11-50'
+                when c.n between 51 and 200 then '51-200'
+                when c.n between 201 and 500 then '201-500'
+                when c.n between 501 and 1000 then '501-1000'
                 else '1000+'
             end as bucket,
             case
-                when k = 0 then 0
-                when k between 1 and 10 then 1
-                when k between 11 and 50 then 2
-                when k between 51 and 200 then 3
-                when k between 201 and 500 then 4
-                when k between 501 and 1000 then 5
+                when c.n between 1 and 10 then 1
+                when c.n between 11 and 50 then 2
+                when c.n between 51 and 200 then 3
+                when c.n between 201 and 500 then 4
+                when c.n between 501 and 1000 then 5
                 else 6
-            end as sort_order,
-            is_pro
-        from user_totals
-    )
-    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
-    from (
+            end as sort_order
+        from counts_per_user c
+        join public.profiles p on p.id = c.user_id
+        where p.is_beta = false
+    ),
+    active_counts as (
         select
             bucket,
             sort_order,
             count(*) filter (where is_pro = true)::bigint as pro,
             count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
             count(*)::bigint as total
-        from bucketed
+        from active
         group by bucket, sort_order
+    ),
+    pool as (
+        select
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from public.profiles
+        where is_beta = false
+    ),
+    zero_row as (
+        select
+            '0'::text as bucket,
+            0 as sort_order,
+            (pool.pro - coalesce((select sum(pro) from active_counts), 0))::bigint as pro,
+            (pool.free - coalesce((select sum(free) from active_counts), 0))::bigint as free,
+            (pool.total - coalesce((select sum(total) from active_counts), 0))::bigint as total
+        from pool
+    )
+    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
+    from (
+        select bucket, sort_order, pro, free, total from zero_row
+        union all
+        select bucket, sort_order, pro, free, total from active_counts
     ) t;
     return result;
 end;
@@ -111,45 +128,61 @@ begin
           and (since_date is null or seen_at >= since_date)
         group by user_id
     ),
-    user_totals as (
-        select coalesce(c.n, 0) as k, p.is_pro
-        from public.profiles p
-        left join counts_per_user c on c.user_id = p.id
-        where p.is_beta = false
-    ),
-    bucketed as (
+    active as (
         select
+            p.is_pro,
             case
-                when k = 0 then '0'
-                when k between 1 and 10 then '1-10'
-                when k between 11 and 50 then '11-50'
-                when k between 51 and 200 then '51-200'
-                when k between 201 and 500 then '201-500'
-                when k between 501 and 1000 then '501-1000'
+                when c.n between 1 and 10 then '1-10'
+                when c.n between 11 and 50 then '11-50'
+                when c.n between 51 and 200 then '51-200'
+                when c.n between 201 and 500 then '201-500'
+                when c.n between 501 and 1000 then '501-1000'
                 else '1000+'
             end as bucket,
             case
-                when k = 0 then 0
-                when k between 1 and 10 then 1
-                when k between 11 and 50 then 2
-                when k between 51 and 200 then 3
-                when k between 201 and 500 then 4
-                when k between 501 and 1000 then 5
+                when c.n between 1 and 10 then 1
+                when c.n between 11 and 50 then 2
+                when c.n between 51 and 200 then 3
+                when c.n between 201 and 500 then 4
+                when c.n between 501 and 1000 then 5
                 else 6
-            end as sort_order,
-            is_pro
-        from user_totals
-    )
-    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
-    from (
+            end as sort_order
+        from counts_per_user c
+        join public.profiles p on p.id = c.user_id
+        where p.is_beta = false
+    ),
+    active_counts as (
         select
             bucket,
             sort_order,
             count(*) filter (where is_pro = true)::bigint as pro,
             count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
             count(*)::bigint as total
-        from bucketed
+        from active
         group by bucket, sort_order
+    ),
+    pool as (
+        select
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from public.profiles
+        where is_beta = false
+    ),
+    zero_row as (
+        select
+            '0'::text as bucket,
+            0 as sort_order,
+            (pool.pro - coalesce((select sum(pro) from active_counts), 0))::bigint as pro,
+            (pool.free - coalesce((select sum(free) from active_counts), 0))::bigint as free,
+            (pool.total - coalesce((select sum(total) from active_counts), 0))::bigint as total
+        from pool
+    )
+    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
+    from (
+        select bucket, sort_order, pro, free, total from zero_row
+        union all
+        select bucket, sort_order, pro, free, total from active_counts
     ) t;
     return result;
 end;
@@ -180,45 +213,61 @@ begin
           and (since_date is null or seen_at >= since_date)
         group by user_id
     ),
-    user_totals as (
-        select coalesce(c.n, 0) as k, p.is_pro
-        from public.profiles p
-        left join counts_per_user c on c.user_id = p.id
-        where p.is_beta = false
-    ),
-    bucketed as (
+    active as (
         select
+            p.is_pro,
             case
-                when k = 0 then '0'
-                when k between 1 and 10 then '1-10'
-                when k between 11 and 50 then '11-50'
-                when k between 51 and 200 then '51-200'
-                when k between 201 and 500 then '201-500'
-                when k between 501 and 1000 then '501-1000'
+                when c.n between 1 and 10 then '1-10'
+                when c.n between 11 and 50 then '11-50'
+                when c.n between 51 and 200 then '51-200'
+                when c.n between 201 and 500 then '201-500'
+                when c.n between 501 and 1000 then '501-1000'
                 else '1000+'
             end as bucket,
             case
-                when k = 0 then 0
-                when k between 1 and 10 then 1
-                when k between 11 and 50 then 2
-                when k between 51 and 200 then 3
-                when k between 201 and 500 then 4
-                when k between 501 and 1000 then 5
+                when c.n between 1 and 10 then 1
+                when c.n between 11 and 50 then 2
+                when c.n between 51 and 200 then 3
+                when c.n between 201 and 500 then 4
+                when c.n between 501 and 1000 then 5
                 else 6
-            end as sort_order,
-            is_pro
-        from user_totals
-    )
-    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
-    from (
+            end as sort_order
+        from counts_per_user c
+        join public.profiles p on p.id = c.user_id
+        where p.is_beta = false
+    ),
+    active_counts as (
         select
             bucket,
             sort_order,
             count(*) filter (where is_pro = true)::bigint as pro,
             count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
             count(*)::bigint as total
-        from bucketed
+        from active
         group by bucket, sort_order
+    ),
+    pool as (
+        select
+            count(*) filter (where is_pro = true)::bigint as pro,
+            count(*) filter (where is_pro is null or is_pro = false)::bigint as free,
+            count(*)::bigint as total
+        from public.profiles
+        where is_beta = false
+    ),
+    zero_row as (
+        select
+            '0'::text as bucket,
+            0 as sort_order,
+            (pool.pro - coalesce((select sum(pro) from active_counts), 0))::bigint as pro,
+            (pool.free - coalesce((select sum(free) from active_counts), 0))::bigint as free,
+            (pool.total - coalesce((select sum(total) from active_counts), 0))::bigint as total
+        from pool
+    )
+    select coalesce(jsonb_agg(row_to_json(t) order by t.sort_order), '[]'::jsonb) into result
+    from (
+        select bucket, sort_order, pro, free, total from zero_row
+        union all
+        select bucket, sort_order, pro, free, total from active_counts
     ) t;
     return result;
 end;
