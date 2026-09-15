@@ -56,8 +56,16 @@ export function useRpcData<T>(
 }
 
 // Helper for the standard 'all' | '30d' | '7d' toolbar → ISO since_date arg.
+// Rounded down to the nearest hour so consecutive renders within the same
+// hour produce the same ISO string. Without this rounding, Date.now()
+// advances every render and the string changes, defeating the useEffect
+// deps in the provider + useRpcData — every chart would enter an infinite
+// re-fetch loop (setState → render → new string → deps change → fetch →
+// setState → ...) that hammers the DB and trips the 8s statement_timeout.
 export function sinceFromDateRange(dateRange: 'all' | '30d' | '7d'): string | null {
-    if (dateRange === '7d') return new Date(Date.now() - 7 * 86400_000).toISOString();
-    if (dateRange === '30d') return new Date(Date.now() - 30 * 86400_000).toISOString();
-    return null;
+    if (dateRange === 'all') return null;
+    const hourMs = 3600_000;
+    const nowHour = Math.floor(Date.now() / hourMs) * hourMs;
+    const days = dateRange === '7d' ? 7 : 30;
+    return new Date(nowHour - days * 86400_000).toISOString();
 }
