@@ -1,7 +1,7 @@
 "use client";
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useRpcData } from './useRpcData';
+import { useRpcData, sinceFromDateRange } from './useRpcData';
 import { ChartLoading, ChartError, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type DateRange = 'all' | '30d' | '7d';
@@ -20,14 +20,14 @@ const parseRow = (r: unknown): Row => {
     };
 };
 
-// Adoption breakdown across all non-beta Pro users, mutually exclusive:
-// {None, Home only, Lock only, Both}. since_date is intentionally not passed —
-// adoption is a current-state metric, not windowed. The dateRange prop is
-// accepted for signature parity with the other post-paywall charts.
-export default function WidgetInstallsChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+// Adoption breakdown across the non-beta Pro cohort, mutually exclusive:
+// {None, Home only, Lock only, Both}. since_date scopes the user cohort by
+// profiles.created_at (matches profile_distributions) — adoption itself is
+// still current-state, the window only picks which users we look at.
+export default function WidgetInstallsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const { data, loading, error, retry } = useRpcData(
         'widget_install_stats',
-        { since_date: null },
+        { since_date: sinceFromDateRange(dateRange) },
         parseRow,
     );
 
@@ -45,7 +45,7 @@ export default function WidgetInstallsChart({ filter = 'all' }: { filter?: ProFi
                     <h3 className="text-lg font-bold text-gray-900">Widget Installs</h3>
                     <span className="text-xs text-gray-500">{installedUsers.toLocaleString()} of {poolTotal.toLocaleString()} Pro users have ≥1 widget installed</span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Mutually exclusive buckets — current state, not windowed. Uninstalls decrement.</p>
+                <p className="text-xs text-gray-500 mt-1">Mutually exclusive buckets — current adoption state. Time filter scopes the user cohort by join date.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">

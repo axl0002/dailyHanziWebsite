@@ -17,6 +17,11 @@
 --
 -- Bucket boundaries chosen to cover the observed spread (some Pro users
 -- have thousands of characters at strength=3).
+--
+-- since_date filters the user cohort by profiles.created_at, not the event
+-- timestamp. "Last 7d" = users who joined in the last 7 days, counted across
+-- their full character-learning history. Matches profile_distributions so
+-- every analytics chart reacts to the toolbar the same way.
 
 drop function if exists public.saved_characters_histogram(timestamptz);
 drop function if exists public.learned_characters_histogram(timestamptz);
@@ -40,7 +45,6 @@ begin
     with counts_per_user as (
         select user_id, count(*) as n
         from public.user_saved_characters
-        where (since_date is null or saved_at >= since_date)
         group by user_id
     ),
     active as (
@@ -65,6 +69,7 @@ begin
         from counts_per_user c
         join public.profiles p on p.id = c.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     active_counts as (
         select
@@ -83,6 +88,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     zero_row as (
         select
@@ -125,7 +131,6 @@ begin
         select user_id, count(*) as n
         from public.user_seen_characters
         where strength = 3
-          and (since_date is null or seen_at >= since_date)
         group by user_id
     ),
     active as (
@@ -150,6 +155,7 @@ begin
         from counts_per_user c
         join public.profiles p on p.id = c.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     active_counts as (
         select
@@ -168,6 +174,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     zero_row as (
         select
@@ -210,7 +217,6 @@ begin
         select user_id, count(*) as n
         from public.user_seen_characters
         where strength in (1, 2)
-          and (since_date is null or seen_at >= since_date)
         group by user_id
     ),
     active as (
@@ -235,6 +241,7 @@ begin
         from counts_per_user c
         join public.profiles p on p.id = c.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     active_counts as (
         select
@@ -253,6 +260,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     zero_row as (
         select

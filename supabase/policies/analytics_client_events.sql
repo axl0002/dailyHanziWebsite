@@ -26,8 +26,11 @@ drop function if exists public.notification_tap_stats(timestamptz);
 -- Widget adoption. For each non-beta profile we look at the latest
 -- widget_installed/widget_removed event per (user, surface) pair to figure
 -- out what's currently installed, then bucket the user into exactly one of
--- {None, Home only, Lock only, Both}. since_date is intentionally ignored:
--- adoption is a current-state metric, not a windowed one.
+-- {None, Home only, Lock only, Both}. since_date filters the user cohort by
+-- profiles.created_at (matches profile_distributions), so "last 7d" =
+-- adoption among users who joined in the last 7 days. Adoption itself is
+-- current-state — uninstalls decrement — the window only scopes which users
+-- we look at.
 create or replace function public.widget_install_stats(
     since_date timestamptz default null
 )
@@ -43,9 +46,6 @@ begin
     if not public.is_staff() then
         raise exception 'not authorized';
     end if;
-    -- since_date is deliberately unused here; keep the arg so the client
-    -- signature matches the sibling RPCs.
-    perform since_date;
     -- Two disjoint aggregations then subtract, so we never group-by 200k profile
     -- rows. Only touches profiles (a) once for the pool total, (b) once per
     -- widget-event user for is_pro lookup (indexed pkey).
@@ -84,6 +84,7 @@ begin
         from per_user u
         join public.profiles p on p.id = u.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     installed_counts as (
         select
@@ -102,6 +103,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     none_row as (
         select
@@ -142,7 +144,8 @@ grant execute on function public.widget_install_stats(timestamptz) to authentica
 -- must be an install. The widget name is normalized (lowercase, strip a
 -- trailing "Widget" suffix) so early-version "CharacterWidget" collapses
 -- with later "character" and we get one row per real widget kind.
--- since_date is ignored — this is current state, not a windowed metric.
+-- since_date scopes the user cohort by profiles.created_at (see
+-- widget_install_stats comment).
 create or replace function public.widget_install_breakdown(
     since_date timestamptz default null
 )
@@ -158,7 +161,6 @@ begin
     if not public.is_staff() then
         raise exception 'not authorized';
     end if;
-    perform since_date;
     with events as (
         select
             ce.user_id,
@@ -181,6 +183,7 @@ begin
         join public.profiles p on p.id = l.user_id
         where l.event = 'widget_installed'
           and p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     )
     select coalesce(jsonb_agg(row_to_json(t) order by t.widget, t.surface), '[]'::jsonb) into result
     from (
@@ -202,8 +205,10 @@ grant execute on function public.widget_install_breakdown(timestamptz) to authen
 
 
 -- Histogram of non-beta profiles bucketed by how many widget_tapped events
--- they fired in the window. Users with 0 taps are included so we can see
--- what fraction of the pool never taps the widget.
+-- they fired over their lifetime. since_date scopes the user cohort by
+-- profiles.created_at (matches profile_distributions); taps themselves are
+-- counted across all history. Users with 0 taps are included so we can see
+-- what fraction of the cohort never taps the widget.
 create or replace function public.widget_tap_stats(
     since_date timestamptz default null
 )
@@ -223,7 +228,6 @@ begin
         select user_id, count(*) as n
         from public.client_events
         where event = 'widget_tapped'
-          and (since_date is null or created_at >= since_date)
         group by user_id
     ),
     user_totals as (
@@ -231,6 +235,7 @@ begin
         from public.profiles p
         left join taps t on t.user_id = p.id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     bucketed as (
         select
@@ -270,10 +275,11 @@ revoke all on function public.widget_tap_stats(timestamptz) from public;
 grant execute on function public.widget_tap_stats(timestamptz) to authenticated;
 
 
--- Distinct non-beta users who tapped ≥1 notification of each type in the
--- window, plus a synthetic 'None' row for users who tapped no notifications
--- at all. Bars overlap for the real type rows (a user can tap multiple
--- types); 'None' is disjoint from all of them.
+-- Distinct non-beta users who tapped ≥1 notification of each type over their
+-- lifetime, plus a synthetic 'None' row for users who tapped no
+-- notifications at all. Bars overlap for the real type rows (a user can tap
+-- multiple types); 'None' is disjoint from all of them. since_date scopes
+-- the user cohort by profiles.created_at (matches profile_distributions).
 create or replace function public.notification_tap_stats(
     since_date timestamptz default null
 )
@@ -295,7 +301,6 @@ begin
             coalesce(ce.props->>'type', 'unknown') as type
         from public.client_events ce
         where ce.event = 'notification_tapped'
-          and (since_date is null or ce.created_at >= since_date)
     ),
     users_per_type as (
         select distinct user_id, type from taps
@@ -308,7 +313,9 @@ begin
             count(*)::bigint as total,
             1 as sort_bucket
         from users_per_type u
-        left join public.profiles p on p.id = u.user_id
+        join public.profiles p on p.id = u.user_id
+        where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
         group by u.type
     ),
     none_row as (
@@ -320,6 +327,7 @@ begin
             0 as sort_bucket
         from public.profiles p
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
           and not exists (select 1 from taps t where t.user_id = p.id)
     )
     select coalesce(jsonb_agg(row_to_json(t) order by t.sort_bucket, t.total desc), '[]'::jsonb) into result

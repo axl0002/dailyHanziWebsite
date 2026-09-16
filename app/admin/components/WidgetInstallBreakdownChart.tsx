@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { useRpcData } from './useRpcData';
+import { useRpcData, sinceFromDateRange } from './useRpcData';
 import { ChartLoading, ChartError, ChartEmpty, ChartProOnlyPlaceholder } from './ChartMessage';
 
 type DateRange = 'all' | '30d' | '7d';
@@ -30,11 +30,12 @@ const WIDGET_LABEL = (w: string) => w === 'unknown' ? 'Unknown' : w.charAt(0).to
 // Breakdown of currently-installed widgets by (widget kind × surface). Sits
 // next to WidgetInstallsChart — that one answers "what fraction of Pro users
 // installed anything", this one answers "of those installs, which widget on
-// which surface". Current state; ignores dateRange.
-export default function WidgetInstallBreakdownChart({ filter = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
+// which surface". since_date scopes the cohort by profiles.created_at, same
+// as WidgetInstallsChart.
+export default function WidgetInstallBreakdownChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const { data: rawRows, loading, error, retry } = useRpcData(
         'widget_install_breakdown',
-        { since_date: null },
+        { since_date: sinceFromDateRange(dateRange) },
         parseRow,
     );
 

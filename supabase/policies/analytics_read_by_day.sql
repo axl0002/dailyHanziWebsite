@@ -7,7 +7,11 @@
 -- bar chart matching the rest of the analytics grid. Client-side toolbar
 -- decides whether to show pro, free, or both — RPC always returns both.
 --
--- since_date is inclusive; pass null for all-time.
+-- since_date filters the user cohort by profiles.created_at (inclusive) —
+-- i.e. "for users who joined in the last N days, how many sentences have they
+-- read." Activity itself is counted across the user's full history, not the
+-- window. Pass null for all-time. Matches profile_distributions semantics so
+-- every chart on /admin/analytics reacts to the toolbar the same way.
 -- Users with 0 reads are included in the '0' bucket so % inactive is visible.
 
 drop function if exists public.sentences_read_by_day(timestamptz);
@@ -32,16 +36,15 @@ begin
     if not public.is_staff() then
         raise exception 'not authorized';
     end if;
-    -- Aggregate the read events first, then join to profiles only for users
-    -- who actually read (pkey lookup). The 0-bucket is (pool - active) via
-    -- a single indexed pool count instead of a full-table LEFT JOIN of every
-    -- profile row. Same pattern as widget_install_stats — see
-    -- analytics_client_events.sql for the profiles_is_beta_is_pro_idx index.
+    -- Aggregate reads per user across all time, then join only to the cohort
+    -- of profiles whose created_at is in the window (or all if since_date is
+    -- null). Pool is that same cohort so zero_row = cohort minus active. This
+    -- keeps the subtract-from-pool pattern and gives consistent "last N days
+    -- of new users" semantics across the whole analytics grid.
     with reads_per_user as (
         select user_id, count(*) as n
         from public.daily_sentences
         where read_at is not null
-          and (since_date is null or read_at >= since_date)
         group by user_id
     ),
     active as (
@@ -66,6 +69,7 @@ begin
         from reads_per_user r
         join public.profiles p on p.id = r.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     active_counts as (
         select
@@ -84,6 +88,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     zero_row as (
         select
@@ -123,13 +128,12 @@ begin
     if not public.is_staff() then
         raise exception 'not authorized';
     end if;
-    -- Same subtract-from-pool pattern as sentences_read_histogram. See that
-    -- function's comment for the rationale.
+    -- Same cohort-by-created_at + subtract-from-pool pattern as
+    -- sentences_read_histogram. See that function's comment for rationale.
     with reads_per_user as (
         select user_id, count(*) as n
         from public.user_paragraph_assignments
         where read_at is not null
-          and (since_date is null or read_at >= since_date)
         group by user_id
     ),
     active as (
@@ -154,6 +158,7 @@ begin
         from reads_per_user r
         join public.profiles p on p.id = r.user_id
         where p.is_beta = false
+          and (since_date is null or p.created_at >= since_date)
     ),
     active_counts as (
         select
@@ -172,6 +177,7 @@ begin
             count(*)::bigint as total
         from public.profiles
         where is_beta = false
+          and (since_date is null or created_at >= since_date)
     ),
     zero_row as (
         select
