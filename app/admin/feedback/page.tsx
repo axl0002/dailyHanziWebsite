@@ -128,6 +128,41 @@ export default function FeedbackPage() {
     const sortArrow = (field: SortField) =>
         sortField === field ? (sortOrder === "asc" ? "↑" : "↓") : "";
 
+    // BOM + CRLF so Excel opens the file correctly with non-ASCII text intact.
+    const handleExportCsv = () => {
+        const headers = ["feedback_id", "created_at", "user_id", "email", "platform", "app_version", "timezone", "liked", "improvement", "missing"];
+        const escape = (v: string | null | undefined) => {
+            const s = v ?? "";
+            return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const lines = [headers.join(",")];
+        for (const r of filteredRows) {
+            const u = r.user_id ? usersById[r.user_id] : undefined;
+            lines.push([
+                escape(r.id),
+                escape(r.created_at),
+                escape(r.user_id),
+                escape(u?.email),
+                escape(u?.platform),
+                escape(u?.app_version),
+                escape(u?.timezone),
+                escape(r.liked),
+                escape(r.improvement),
+                escape(r.missing),
+            ].join(","));
+        }
+        const csv = "﻿" + lines.join("\r\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `feedback-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div>
             <div className="mb-6">
@@ -143,23 +178,33 @@ export default function FeedbackPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
-                <div className="relative">
-                    <input
-                        type="text"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search text or email..."
-                        className="pl-3 pr-8 py-2 text-sm border border-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 w-64"
-                    />
-                    {search && (
-                        <button
-                            onClick={() => setSearch("")}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
-                            title="Clear"
-                        >
-                            ✕
-                        </button>
-                    )}
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <input
+                            type="text"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search text or email..."
+                            className="pl-3 pr-8 py-2 text-sm border border-gray-200 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 w-64"
+                        />
+                        {search && (
+                            <button
+                                onClick={() => setSearch("")}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                                title="Clear"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+                    <button
+                        onClick={handleExportCsv}
+                        disabled={filteredRows.length === 0}
+                        className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        title={search ? "Exports rows matching the current search" : "Exports all feedback rows"}
+                    >
+                        Export CSV ({filteredRows.length})
+                    </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2 items-center justify-end">
