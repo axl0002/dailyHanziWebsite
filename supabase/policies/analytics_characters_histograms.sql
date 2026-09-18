@@ -137,7 +137,8 @@ begin
         select
             p.is_pro,
             case
-                when c.n between 1 and 10 then '1-10'
+                when c.n between 1 and 5 then '1-5'
+                when c.n between 6 and 10 then '6-10'
                 when c.n between 11 and 50 then '11-50'
                 when c.n between 51 and 200 then '51-200'
                 when c.n between 201 and 500 then '201-500'
@@ -145,12 +146,13 @@ begin
                 else '1000+'
             end as bucket,
             case
-                when c.n between 1 and 10 then 1
-                when c.n between 11 and 50 then 2
-                when c.n between 51 and 200 then 3
-                when c.n between 201 and 500 then 4
-                when c.n between 501 and 1000 then 5
-                else 6
+                when c.n between 1 and 5 then 1
+                when c.n between 6 and 10 then 2
+                when c.n between 11 and 50 then 3
+                when c.n between 51 and 200 then 4
+                when c.n between 201 and 500 then 5
+                when c.n between 501 and 1000 then 6
+                else 7
             end as sort_order
         from counts_per_user c
         join public.profiles p on p.id = c.user_id
@@ -223,7 +225,8 @@ begin
         select
             p.is_pro,
             case
-                when c.n between 1 and 10 then '1-10'
+                when c.n between 1 and 5 then '1-5'
+                when c.n between 6 and 10 then '6-10'
                 when c.n between 11 and 50 then '11-50'
                 when c.n between 51 and 200 then '51-200'
                 when c.n between 201 and 500 then '201-500'
@@ -231,12 +234,13 @@ begin
                 else '1000+'
             end as bucket,
             case
-                when c.n between 1 and 10 then 1
-                when c.n between 11 and 50 then 2
-                when c.n between 51 and 200 then 3
-                when c.n between 201 and 500 then 4
-                when c.n between 501 and 1000 then 5
-                else 6
+                when c.n between 1 and 5 then 1
+                when c.n between 6 and 10 then 2
+                when c.n between 11 and 50 then 3
+                when c.n between 51 and 200 then 4
+                when c.n between 201 and 500 then 5
+                when c.n between 501 and 1000 then 6
+                else 7
             end as sort_order
         from counts_per_user c
         join public.profiles p on p.id = c.user_id
