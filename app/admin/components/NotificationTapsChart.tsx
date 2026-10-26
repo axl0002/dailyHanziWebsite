@@ -20,9 +20,9 @@ const parseRow = (r: unknown): Row => {
 };
 
 // Distinct Pro users who tapped ≥1 notification of each type in the window,
-// plus a synthetic "None (never tapped)" row for users who tapped no
-// notifications at all. Bars for the real types overlap (a user can tap
-// multiple types); the None row is disjoint from all of them.
+// plus a synthetic "No taps recorded" row. The range scopes signup dates;
+// taps use all recorded history. Real type bars overlap (one user can tap
+// multiple types); the no-recorded-taps row is disjoint from them.
 export default function NotificationTapsChart({ filter = 'all', dateRange = 'all' }: { filter?: ProFilter; dateRange?: DateRange }) {
     const { data, loading, error, retry } = useRpcData(
         'notification_tap_stats',
@@ -35,13 +35,13 @@ export default function NotificationTapsChart({ filter = 'all', dateRange = 'all
     if (filter === 'false') return <ChartProOnlyPlaceholder title="Notification Taps by Type" />;
     if (data.length === 0) return <ChartEmpty title="No Pro users found" />;
 
-    const rangeLabel = dateRange === 'all' ? 'all time' : dateRange === '30d' ? 'last 30 days' : 'last 7 days';
+    const cohortLabel = dateRange === 'all' ? 'all signup dates' : dateRange === '30d' ? 'signed up in the last 30 days' : 'signed up in the last 7 days';
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 md:col-span-2 lg:col-span-1">
             <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900">Notification Taps by Type ({rangeLabel})</h3>
-                <p className="text-xs text-gray-500 mt-1">Distinct Pro users who tapped each type. Type bars overlap (users can tap multiple); the &quot;None&quot; row is disjoint.</p>
+                <h3 className="text-lg font-bold text-gray-900">Notification Taps by Type</h3>
+                <p className="text-xs text-gray-500 mt-1">Pro users: {cohortLabel}. Taps include all recorded history, not just the selected signup window. Type bars overlap; &quot;No taps recorded&quot; is disjoint.</p>
             </div>
             <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">

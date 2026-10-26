@@ -275,10 +275,10 @@ revoke all on function public.widget_tap_stats(timestamptz) from public;
 grant execute on function public.widget_tap_stats(timestamptz) to authenticated;
 
 
--- Distinct non-beta users who tapped ≥1 notification of each type over their
--- lifetime, plus a synthetic 'None' row for users who tapped no
--- notifications at all. Bars overlap for the real type rows (a user can tap
--- multiple types); 'None' is disjoint from all of them. since_date scopes
+-- Distinct non-beta users with ≥1 recorded notification tap of each type over
+-- their lifetime, plus a synthetic 'No taps recorded' row. Missing events do
+-- not prove a user never tapped. Real type bars overlap (a user can tap
+-- multiple types); 'No taps recorded' is disjoint from them. since_date scopes
 -- the user cohort by profiles.created_at (matches profile_distributions).
 create or replace function public.notification_tap_stats(
     since_date timestamptz default null
@@ -300,7 +300,7 @@ begin
             ce.user_id,
             coalesce(ce.props->>'type', 'unknown') as type
         from public.client_events ce
-        where ce.event = 'notification_tapped'
+        where ce.event = 'push_notification_tapped'
     ),
     users_per_type as (
         select distinct user_id, type from taps
@@ -320,7 +320,7 @@ begin
     ),
     none_row as (
         select
-            'None (never tapped)' as type,
+            'No taps recorded' as type,
             count(*) filter (where p.is_pro = true)::bigint as pro,
             count(*) filter (where p.is_pro is null or p.is_pro = false)::bigint as free,
             count(*)::bigint as total,
