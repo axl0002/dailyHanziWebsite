@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
+import { isAdminOnlyPath } from "@/lib/adminAccess";
 
 export default function AdminLayout({
     children,
@@ -42,7 +43,7 @@ export default function AdminLayout({
 
                 // Moderators can't view the revenue dashboard; bounce to reports.
                 // (Middleware enforces this server-side; this covers client nav.)
-                if (!admin && pathname.startsWith("/admin/dashboard")) {
+                if (!admin && isAdminOnlyPath(pathname)) {
                     router.replace("/admin/sentence-reports");
                 }
 
@@ -132,6 +133,19 @@ export default function AdminLayout({
                                 </svg>
                             }
                             label="Dashboard"
+                        />
+                    )}
+                    {isAdmin && (
+                        <NavItem
+                            href="/admin/north-star"
+                            active={pathname === "/admin/north-star"}
+                            collapsed={collapsed}
+                            icon={
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z" />
+                                </svg>
+                            }
+                            label="North Star"
                         />
                     )}
                     <NavItem

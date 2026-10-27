@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isAdminOnlyPath } from './lib/adminAccess'
 
 export async function middleware(request: NextRequest) {
     let response = NextResponse.next({
@@ -73,7 +74,7 @@ export async function middleware(request: NextRequest) {
 
         // Moderators must not see the revenue dashboard. This is the real gate;
         // the nav is hidden in the layout for UX, but enforcement lives here.
-        if (!roles.includes('admin') && request.nextUrl.pathname.startsWith('/admin/dashboard')) {
+        if (!roles.includes('admin') && isAdminOnlyPath(request.nextUrl.pathname)) {
             const url = request.nextUrl.clone()
             url.pathname = '/admin/sentence-reports'
             return NextResponse.redirect(url)

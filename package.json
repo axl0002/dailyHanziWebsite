@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:north-star": "node --experimental-strip-types --test tests/northStar.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
