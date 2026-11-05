@@ -106,3 +106,9 @@ Next attribution layers: connect App Store Connect / Google Play acquisition rep
 ## Local checks
 
 `node --test tests/social-acquisition.test.cjs` runs mocked provider and aggregation checks without contacting social platforms. `npx tsc --noEmit` validates the app types. Live API verification requires provider authorization and the database migration; local tests do not establish that a configured account has approved permissions.
+
+## Instagram callback troubleshooting
+
+The generated login URL explicitly includes `override_default_response_type=true` as required by Facebook Login for Business system-user configurations. A provider approval screen confirms Meta granted access, not that the app saved the connection. Success is confirmed only by a stored account and the dashboard connection result.
+
+Apply `202611060001_instagram_connection_attempts.sql` to the marketing project. Connection attempts store a one-way hash of state, safe stage/status labels and sanitized messages; no tokens, authorization codes, raw state or provider response bodies are stored. The latest attempt appears in Acquisition and remains visible after a refresh. `awaiting_meta` means the start was recorded but a verified callback has not completed; error stages distinguish validation, code exchange, account discovery, insight permissions and database storage. OAuth error URLs remain visible until the next connection attempt instead of disappearing on mount. Provider errors include only numeric codes and subcodes to diagnose permissions without exposing secrets.

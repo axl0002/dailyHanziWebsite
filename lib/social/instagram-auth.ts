@@ -49,28 +49,33 @@ export function loginUrl(state: string) {
     const config = instagramConfig()
     const url = new URL('https://www.facebook.com/dialog/oauth')
     url.search = new URLSearchParams({ client_id: config.clientId, config_id: config.configId,
-        redirect_uri: config.redirectUri, response_type: 'code', prompt: 'login', state }).toString()
+        redirect_uri: config.redirectUri, response_type: 'code', override_default_response_type: 'true', prompt: 'login', state }).toString()
     return url
 }
-async function meta(url: URL, token?: string) {
+async function meta(url: URL, token?: string, stage = 'request') {
     let response: Response
     try { response = await fetch(url, { cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(20000) }) }
     catch { throw new SocialError('Instagram connection timed out. Please reconnect.', 502) }
     // Meta errors may contain tokens, codes or identifiers. Never forward their bodies.
-    if (!response.ok) throw new SocialError('Meta rejected the connection. Check app credentials, redirect URI, permissions and selected account access.', 502)
-    const body = await response.json()
-    if (body.error) throw new SocialError('Meta rejected the connection. Check configuration and permissions.', 502)
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok || body.error) {
+        const code = typeof body.error?.code === 'number' ? `; code ${body.error.code}` : ''
+        const subcode = typeof body.error?.error_subcode === 'number' ? `; subcode ${body.error.error_subcode}` : ''
+        throw new SocialError(`Instagram ${stage} failed (HTTP ${response.status}${code}${subcode}). Check app credentials, redirect URI and granted permissions.`, 502)
+    }
     return body
 }
-export async function authorizeInstagram(code: string, db: SupabaseClient) {
+export async function authorizeInstagram(code: string, db: SupabaseClient, progress?: (stage: string) => Promise<void>) {
     const config = instagramConfig()
     const exchange = new URL(`https://graph.facebook.com/${config.version}/oauth/access_token`)
     // This is Meta's documented server-to-server code exchange. This URL is never logged or sent to the browser.
     exchange.search = new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret,
         code, redirect_uri: config.redirectUri }).toString()
-    const grant = await meta(exchange)
+    await progress?.('code_exchange')
+    const grant = await meta(exchange, undefined, 'code exchange')
     if (typeof grant.access_token !== 'string' || !grant.access_token) throw new SocialError('Meta did not return an access token.', 502)
     const token = grant.access_token as string
+    await progress?.('account_discovery')
     const granted: { id: string; username: string }[] = []
     const seen = new Set<string>()
     let after: string | undefined
@@ -80,7 +85,7 @@ export async function authorizeInstagram(code: string, db: SupabaseClient) {
         url.searchParams.set('fields', 'id,username')
         url.searchParams.set('limit', '100')
         if (after) url.searchParams.set('after', after)
-        const result = await meta(url, token)
+        const result = await meta(url, token, 'account discovery')
         if (!Array.isArray(result.data)) throw new SocialError('Meta did not return the authorized Instagram accounts.', 502)
         for (const account of result.data) {
             if (typeof account.id !== 'string' || !/^\d+$/.test(account.id) || typeof account.username !== 'string') throw new SocialError('Unexpected Instagram account details.', 502)
@@ -93,12 +98,14 @@ export async function authorizeInstagram(code: string, db: SupabaseClient) {
     }
     if (!granted.length) throw new SocialError('No Instagram account was shared. Reconnect and select your professional account.', 400)
     // Verify insight permission before persisting a connection. No need for a Page or ads permissions.
+    await progress?.('insights_check')
     for (const account of granted) {
         const url = new URL(`https://graph.facebook.com/${config.version}/${account.id}/insights`)
         url.search = new URLSearchParams({ metric: 'views', period: 'day', metric_type: 'total_value' }).toString()
-        await meta(url, token)
+        await meta(url, token, 'insights permission check')
     }
     const expires = typeof grant.expires_in === 'number' && grant.expires_in > 0 ? new Date(Date.now() + grant.expires_in * 1000).toISOString() : null
+    await progress?.('saving_connection')
     const { error } = await db.from('social_instagram_connections').upsert(granted.map(account => ({
         app_id: appId(), account_id: account.id, username: account.username,
         encrypted_access_token: encryptToken(token, account.id), token_expires_at: expires, updated_at: new Date().toISOString(),

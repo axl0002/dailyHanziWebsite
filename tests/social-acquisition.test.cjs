@@ -216,8 +216,8 @@ test('dashboard reads only app-scoped marketing tables and preserves missing-day
         '@/lib/social/server': { database: () => db, appId: () => 'daily-hanzi', staff: async () => {}, failure: error => { throw error } },
     })
     const report = await route.GET({ url: 'https://admin.example/api/admin/acquisition?days=7' })
-    assert.equal(reads.join(','), 'social_snapshots,marketing_signup_days,social_sync_runs')
-    assert.equal(scopes.length, 3)
+    assert.equal(reads.join(','), 'social_snapshots,social_instagram_connection_attempts,marketing_signup_days,social_sync_runs')
+    assert.equal(scopes.length, 4)
     assert.ok(scopes.every(([, field, value]) => field === 'app_id' && value === 'daily-hanzi'))
     assert.equal(report.daily[0].signups, null)
     assert.equal(report.daily[6].signups, 2)

@@ -24,6 +24,9 @@ export async function GET(request: Request) {
             snapshots.push(...(data || []))
             if ((data?.length || 0) < 1000) break
         }
+        const { data: connectionAttempts, error: attemptError } = await db.from('social_instagram_connection_attempts')
+            .select('status,stage,message,created_at,updated_at').eq('app_id', appId()).order('created_at', { ascending: false }).limit(1)
+        if (attemptError) throw new SocialError('Apply the Instagram connection-attempt migration in the marketing project.', 503)
         const summary = summarize(snapshots, start, end)
         const daily = new Map(Array.from({ length: days }, (_, i) => {
             const day = new Date(Date.parse(`${start}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10)
@@ -48,7 +51,7 @@ export async function GET(request: Request) {
         const { data: runs, error } = await db.from('social_sync_runs').select('id,platform,account_id,label,started_at,completed_at,status,post_count,message')
             .eq('app_id', appId()).order('started_at', { ascending: false }).limit(100)
         if (error) throw new SocialError('Could not load sync history.', 500)
-        return NextResponse.json({ daily: [...daily.values()], posts: summary.posts, sources, runs, signupCoverage: { measuredDays: signupDays?.length || 0, totalDays: days,
+        return NextResponse.json({ instagramAttempt: connectionAttempts?.[0] ?? null, daily: [...daily.values()], posts: summary.posts, sources, runs, signupCoverage: { measuredDays: signupDays?.length || 0, totalDays: days,
                 lastCollectedAt: signupDays?.length ? signupDays.map(row => row.collected_at).sort()[0] : null },
             accounts: (await connectedAccounts(db, accounts())).map(({ platform, accountId, label }) => ({ platform, accountId, label })) }, { headers: { 'Cache-Control': 'no-store' } })
     } catch (error) { return failure(error) }

@@ -6,7 +6,7 @@ import type { Snapshot } from '@/lib/social/metrics'
 
 type Daily = { day: string; instagram: number | null; tiktok: number | null; signups: number | null; instagramReferrals: number | null; tiktokReferrals: number | null; unknownReferrals: number | null }
 type Post = Snapshot & { gain: number | null; measuredDays: number }
-type Report = { signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
+type Report = { instagramAttempt?: { status: string; stage: string; message: string | null; updated_at: string } | null; signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
     accounts: { platform: string; accountId: string; label: string }[];
     runs: { id: string; platform: string; account_id: string; label: string; started_at: string; status: string; message: string | null; post_count: number | null }[] }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString()
@@ -20,8 +20,7 @@ export default function AcquisitionPage() {
         const count = url.searchParams.get('instagram_connected')
         if (error || count) {
             setConnectionMessage(error || `Connected ${count} Instagram account(s). Click Sync now to collect your first snapshot.`)
-            url.searchParams.delete('instagram_error'); url.searchParams.delete('instagram_connected')
-            window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+            // Preserve the result in the URL across reloads/remounts until the next connection attempt.
         }
     }, [])
     const [report, setReport] = useState<Report | null>(null)
@@ -79,6 +78,12 @@ export default function AcquisitionPage() {
                 <p className="mt-1 text-sm text-gray-600">Connect your professional account through Meta to read posts and view insights. Select the Instagram accounts you want to track.</p></div>
                 <form action="/api/admin/instagram/connect" method="post"><button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">Connect / reconnect Instagram</button></form>
             </div>
+            {report?.instagramAttempt && <p role="status" className={`mt-3 rounded-lg p-3 text-sm ${report.instagramAttempt.status === 'error' ? 'bg-red-50 text-red-800' : 'bg-indigo-50 text-indigo-900'}`}>
+                {report.instagramAttempt.message || `Connection ${report.instagramAttempt.status}: ${report.instagramAttempt.stage.replaceAll('_', ' ')}`}
+                <span className="ml-2 text-xs">{new Date(report.instagramAttempt.updated_at).toLocaleString()}</span>
+                {report.instagramAttempt.status === 'started' && ' If you already finished Meta approval, return here and start Connect Instagram again; the callback has not been recorded.'}
+            </p>}
+            {report && !report.accounts.some(account => account.platform === 'instagram') && <p className="mt-3 text-sm text-amber-800">Instagram is not connected yet.</p>}
             {connectionMessage && <p role="status" className="mt-3 text-sm">{connectionMessage}</p>}
         </section>
         {loading && <p role="status">Loading acquisition data…</p>}

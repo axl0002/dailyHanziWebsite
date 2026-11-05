@@ -26,6 +26,7 @@ test('Unified Login uses config_id and state with an allowlisted HTTPS redirect'
     const f = authFixture(), url = f.loginUrl('state')
     assert.equal(url.origin, 'https://www.facebook.com')
     assert.equal(url.searchParams.get('config_id'), '456'); assert.equal(url.searchParams.get('state'), 'state')
+    assert.equal(url.searchParams.get('override_default_response_type'), 'true');
     assert.equal(url.searchParams.get('response_type'), 'code'); assert.equal(url.searchParams.has('scope'), false)
     assert.ok(!String(url).includes('private-secret'))
     assert.throws(() => authFixture([], { INSTAGRAM_REDIRECT_URI: 'http://evil.test/callback' }).loginUrl('state'))
@@ -68,6 +69,7 @@ function callbackFixture({ expected, state, denied = false, forbidden = false } 
     let authorizations = 0, cleared = false
     const cookie = { get: () => expected ? { value: expected } : undefined, set: (_key, _value, options) => { cleared = options.maxAge === 0 } }
     const module = load('app/api/admin/instagram/callback/route.ts', {
+        '@/lib/social/instagram-attempts': { updateAttempt: async () => {} },
         'next/headers': { cookies: async () => cookie }, 'next/server': { NextResponse: { redirect: url => url } },
         '@/lib/social/server': { SocialError, staff: async () => { if (forbidden) throw new SocialError('Forbidden', 403) }, database: () => ({}) },
         '@/lib/social/instagram-auth': { instagramStateCookie: 'state', instagramConfig: () => ({ redirectUri: env.INSTAGRAM_REDIRECT_URI }),
@@ -87,4 +89,27 @@ test('verified callback clears state and redirects without code or token', async
     const state = 'a'.repeat(64), f = callbackFixture({ expected: state, state }), url = await f.GET(f.request)
     assert.equal(f.count(), 1); assert.ok(f.cleared()); assert.equal(url.searchParams.get('instagram_connected'), '1')
     assert.equal(url.pathname, '/admin/acquisition'); assert.ok(!String(url).includes('code='))
+})
+
+test('Meta diagnostics retain safe error codes and stage without provider secrets', async () => {
+    const f = authFixture([{ error: { code: 190, error_subcode: 123, message: 'private-token private-secret one-time-code' } }])
+    await assert.rejects(f.authorizeInstagram('one-time-code', f.db), error => {
+        assert.match(error.message, /code exchange/); assert.match(error.message, /code 190/); assert.match(error.message, /subcode 123/)
+        assert.ok(!error.message.includes('private-token')); assert.ok(!error.message.includes('private-secret')); assert.ok(!error.message.includes('one-time-code'))
+        return true
+    })
+})
+test('connection progress identifies the failure stage before any credential persistence', async () => {
+    const f = authFixture([{ access_token: 'private-token' }, { data: [] }]), stages = []
+    await assert.rejects(f.authorizeInstagram('code', f.db, async stage => stages.push(stage)), /No Instagram account/)
+    assert.equal(stages.join(','), 'code_exchange,account_discovery'); assert.equal(f.writes.length, 0)
+})
+test('OAuth attempt IDs hash state and do not store codes or tokens', async () => {
+    const rows = [], writes = []
+    const f = load('lib/social/instagram-attempts.ts', { './server': { SocialError, appId: () => 'daily-hanzi' } })
+    const db = { from: () => ({ insert: async row => { rows.push(row); return {} },
+        update: value => { writes.push(value); return { eq: () => ({ eq: async () => ({}) }) } } }) }
+    await f.beginAttempt(db, 'private-state'); await f.updateAttempt(db, 'private-state', 'code_exchange')
+    assert.equal(rows[0].id.length, 64); assert.equal(rows[0].status, 'started')
+    assert.ok(!JSON.stringify(rows).includes('private-state')); assert.equal(writes[0].stage, 'code_exchange')
 })
