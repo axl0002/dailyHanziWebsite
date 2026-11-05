@@ -49,15 +49,34 @@ The admin-only `/admin/acquisition` dashboard compares daily social view gains, 
 5. Open Acquisition as an admin and click **Sync now**. Verify each account reports success. This performs read-only social API calls and writes reporting snapshots to the marketing project. The same sync reads the app's last 90 UTC days of non-beta signups, computes daily counts, and transactionally upserts aggregates in marketing. A successful run includes zero-signup days; failed reads preserve prior aggregates. Signup sync also works with `SOCIAL_ACCOUNTS_JSON=[]`, before social accounts are authorized.
 6. Configure an external scheduler to call `GET /api/cron/social-sync` with `Authorization: Bearer <CRON_SECRET>`. Set a long random `CRON_SECRET` on the server. Run once daily at a consistent UTC time, e.g. `5 0 * * *`. No schedule is automatically installed. The route allows up to 300 seconds; hosting must support that duration. For large libraries, move collection to a background worker before enabling more accounts. A timed-out running account becomes eligible for retry after 15 minutes.
 
-## Instagram setup
+## Instagram setup — Unified Login
 
-Use **Instagram API with Facebook Login**, a professional Instagram account linked to a Facebook Page, and a token authorized for that account. Configure a Meta developer app and obtain the relevant permissions (`instagram_basic`, `instagram_manage_insights`, `pages_read_engagement`, plus discovery permissions such as `pages_show_list` as needed). App review/access requirements depend on account and app ownership. Use the Instagram account ID, not the Page ID. Token acquisition is performed in the provider's developer tools; this version does not provide an in-app OAuth connect flow or automatic Meta token renewal. Monitor expiry and rotate the server token.
+Use Meta's recommended **Instagram API with Unified Login**. The Acquisition page now provides **Connect / reconnect Instagram**, using Facebook Login for Business with a `config_id`, server-side authorization code exchange, a ten-minute Secure/HttpOnly/SameSite OAuth-state cookie, and discovery through `/me/assigned_instagram_accounts`. No Facebook Page is needed for this flow. `/me` is a business integration system user, not an Instagram account.
 
-The collector requests `/{ig-user-id}/media` and `/{media-id}/insights?metric=views`, paginates the entire media library, and classifies `CAROUSEL_ALBUM` as Carousel and `media_product_type=REELS` as Reel. Insights may be unavailable for some older media; an API rejection fails the account with a visible error rather than publishing a partial baseline. Stories and carousel-slide-level analytics are not collected. `INSTAGRAM_GRAPH_VERSION` defaults to `v26.0`; pin a supported version for your Meta app and validate metrics against real authorized media.
+1. In Meta's Daily Hanzi app, select **Use cases → Manage messaging & content on Instagram → Customize → API setup with Unified login**. The app must belong to a business portfolio and use Facebook Login for Business.
+2. Create/select an Instagram Login Compatible configuration. Include `instagram_basic` and `instagram_manage_insights`. Meta's Unified Login configuration also requires `instagram_manage_messages`; the dashboard does not read messages. Remove optional publishing/comment/advertising permissions and ad-account access if Meta allows, since this app only reads analytics. Inspect the configuration preview and requested permissions before authorizing.
+3. Save this exact Redirect URL: `https://dailyhanzi.app/api/admin/instagram/callback`.
+4. Set these **server-only Vercel Production environment variables** and redeploy:
+
+   | Variable | Value |
+   | --- | --- |
+   | `INSTAGRAM_META_APP_ID` | Meta app ID from app settings, not a legacy Instagram app ID. |
+   | `INSTAGRAM_META_APP_SECRET` | Meta app secret from app settings. |
+   | `INSTAGRAM_LOGIN_CONFIG_ID` | ID of the Unified Login configuration. |
+   | `INSTAGRAM_REDIRECT_URI` | `https://dailyhanzi.app/api/admin/instagram/callback` |
+   | `SOCIAL_TOKEN_ENCRYPTION_KEY` | Random 32-byte base64 secret. Generate with `openssl rand -base64 32`. Keep it stable: changing it requires reconnecting accounts. |
+   | `INSTAGRAM_GRAPH_VERSION` | Optional pinned version, defaults to `v27.0`. |
+
+5. Apply `supabase/marketing/migrations/202611050002_instagram_unified_login.sql` to the dedicated marketing project. Connections are app-scoped, service-role-only, and AES-256-GCM encrypted with the app/account identity as authenticated data. The browser never receives tokens or the app secret.
+6. As an admin, open Acquisition, click **Connect / reconnect Instagram**, sign in through Meta and explicitly select the professional account(s) to track. In Development mode use an app role/Instagram Tester; accept any tester invite in Instagram's Website permissions. Public onboarding requires the appropriate Advanced Access/App Review and Live mode.
+7. The callback verifies state and admin authorization, exchanges the one-time code, discovers assigned accounts (including pagination), verifies insights access and stores encrypted credentials. Connected accounts appear in sync status. Click **Sync now**; collect on consecutive UTC days to calculate daily gains. Meta cancellation leaves existing connections intact. Errors never expose provider response bodies or tokens. Expired/revoked grants require reconnection; non-expiring tokens can still be revoked.
+
+Existing manually configured Instagram entries in `SOCIAL_ACCOUNTS_JSON` remain supported. Connected accounts take precedence over manual entries with the same ID, preventing duplicate syncs. TikTok configuration is unchanged. The media collector continues to use `graph.facebook.com`, request `views` insights, classify Reels/carousels, and paginate without following arbitrary provider next URLs. It does not subscribe to messaging/comment webhooks because analytics collection is polled.
 
 Official references:
-- https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/
-- https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-media/insights/
+- https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started
+- https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/authentication
+- https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/permissions
 
 ## TikTok setup
 

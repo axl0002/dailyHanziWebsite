@@ -27,7 +27,7 @@ export async function collect(account: SocialAccount, now = new Date()): Promise
         day: now.toISOString().slice(0, 10), observed_at: now.toISOString() }
     const rows: Snapshot[] = []
     if (account.platform === 'instagram') {
-        const version = process.env.INSTAGRAM_GRAPH_VERSION || 'v26.0'
+        const version = process.env.INSTAGRAM_GRAPH_VERSION || 'v27.0'
         if (!/^v\d+\.0$/.test(version)) throw new Error('Invalid Instagram Graph version.')
         let after: string | undefined
         for (let page = 0; ; page++) {

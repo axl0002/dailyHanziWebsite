@@ -1,3 +1,4 @@
+import { connectedAccounts } from '@/lib/social/instagram-auth'
 import { NextResponse } from 'next/server'
 import { accounts } from '@/lib/social/providers'
 import { summarize, type Snapshot } from '@/lib/social/metrics'
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
         if (error) throw new SocialError('Could not load sync history.', 500)
         return NextResponse.json({ daily: [...daily.values()], posts: summary.posts, sources, runs, signupCoverage: { measuredDays: signupDays?.length || 0, totalDays: days,
                 lastCollectedAt: signupDays?.length ? signupDays.map(row => row.collected_at).sort()[0] : null },
-            accounts: accounts().map(({ platform, accountId, label }) => ({ platform, accountId, label })) }, { headers: { 'Cache-Control': 'no-store' } })
+            accounts: (await connectedAccounts(db, accounts())).map(({ platform, accountId, label }) => ({ platform, accountId, label })) }, { headers: { 'Cache-Control': 'no-store' } })
     } catch (error) { return failure(error) }
 }
 export async function POST(request: Request) {
