@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { isAdminOnlyPath } from './lib/adminAccess'
 
 export async function middleware(request: NextRequest) {
+    // Store routing is public and does not need auth/session refresh requests.
+    if (request.nextUrl.pathname === '/download') return NextResponse.next()
     let response = NextResponse.next({
         request: {
             headers: request.headers,

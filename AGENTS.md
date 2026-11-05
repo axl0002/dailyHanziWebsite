@@ -19,3 +19,10 @@
 - The report excludes the latest 48 hours for arrival lag; trials additionally need a mature 48-hour window. The cache is private, generated on demand, expires after six hours and supports an explicit refresh. No recurring job was added. Activity capture began October 27, 2026; improved widget checks require mobile build162 adoption.
 - Verification: `npm run test:north-star` (Node with native TypeScript stripping), `npx tsc --noEmit`, scoped ESLint, and `npm run build`. No live UI test is authorized.
 - Production deploys via the existing GitHub-to-Vercel integration for `xinweis-projects/daily-hanzi-website`. Verify the production deployment's exact commit after pushing. The connected Vercel plugin account may expose a different team; do not deploy into an unrelated project.
+
+## App store invite link
+
+- `/download` is a public, dynamic GET route for the mobile share message. iPhone/iPad/iPod user agents redirect302 to App Store app6756919959; Android redirects302 to Google Play package com.alexliu.dailyhanzi. Desktop/unknown/crawler requests receive an accessible page with both stores; its touch-device fallback handles iPadOS desktop user agents.
+- Responses use Cache-Control:no-store and Vary:User-Agent so one platform's store redirect cannot be cached for another. Request/query values never supply a redirect destination. This exact public path bypasses middleware's unnecessary Supabase session refresh; existing admin role gates remain unchanged.
+- User explicitly chose store-only routing instead of Universal Links/deferred invitation handling. Sharing retains the sender's username for manual adding after install; the route does not redeem invite codes, modify friendship or request login. No iOS association file, entitlement or Branch SDK is needed for this flow.
+- Verification: `node --test test/download-store.test.cjs` (eight isolated route cases), `npx tsc --noEmit`, scoped ESLint and production build. An existing unused middleware options warning remains. No live UI test or simulator.
