@@ -124,6 +124,15 @@ export default function AdminLayout({
                 <nav className="mt-6 px-2 space-y-2 flex-grow">
                     {isAdmin && (
                         <NavItem
+                            href="/admin/acquisition"
+                            active={pathname === "/admin/acquisition"}
+                            collapsed={collapsed}
+                            icon={<span aria-hidden="true" className="w-6 text-center">↗</span>}
+                            label="Acquisition"
+                        />
+                    )}
+                    {isAdmin && (
+                        <NavItem
                             href="/admin/dashboard"
                             active={pathname === "/admin/dashboard"}
                             collapsed={collapsed}
