@@ -38,16 +38,25 @@ export async function collect(account: SocialAccount, now = new Date()): Promise
             if (after) url.searchParams.set('after', after)
             const result = await request(url, account.accessToken)
             if (!Array.isArray(result.data)) throw new Error('Unexpected Instagram media response.')
-            for (const media of result.data) {
-                const insightsUrl = new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(media.id)}/insights`)
-                insightsUrl.searchParams.set('metric', 'views')
-                // Fail this account on insight errors, rather than silently storing zero.
-                const insights = await request(insightsUrl, account.accessToken)
-                const views = insights.data?.find((m: { name: string }) => m.name === 'views')?.values?.[0]?.value
-                rows.push({ ...base, post_id: media.id, caption: media.caption || '',
-                    format: media.media_type === 'CAROUSEL_ALBUM' ? 'Carousel' : media.media_product_type === 'REELS' ? 'Reel' : media.media_type === 'IMAGE' ? 'Photo' : 'Video',
-                    permalink: safePostUrl(media.permalink, 'instagram'), published_at: media.timestamp,
-                    views: counter(views), likes: counter(media.like_count), comments: counter(media.comments_count), shares: null })
+            // Keep the number of in-flight reads bounded. Page-sized Promise.all
+            // would burst up to 100 requests; serial reads exceed function limits
+            // on larger libraries. A failed read still prevents any account commit.
+            for (let offset = 0; offset < result.data.length; offset += 4) {
+                const batch: Promise<Snapshot>[] = []
+                for (const media of result.data.slice(offset, offset + 4)) {
+                    batch.push((async (): Promise<Snapshot> => {
+                        const insightsUrl = new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(media.id)}/insights`)
+                        insightsUrl.searchParams.set('metric', 'views')
+                        // Fail this account on insight errors, rather than silently storing zero.
+                        const insights = await request(insightsUrl, account.accessToken)
+                        const views = insights.data?.find((m: { name: string }) => m.name === 'views')?.values?.[0]?.value
+                        return { ...base, post_id: media.id, caption: media.caption || '',
+                            format: media.media_type === 'CAROUSEL_ALBUM' ? 'Carousel' : media.media_product_type === 'REELS' ? 'Reel' : media.media_type === 'IMAGE' ? 'Photo' : 'Video',
+                            permalink: safePostUrl(media.permalink, 'instagram'), published_at: media.timestamp,
+                            views: counter(views), likes: counter(media.like_count), comments: counter(media.comments_count), shares: null }
+                    })())
+                }
+                rows.push(...await Promise.all(batch))
             }
             if (!result.paging?.next) break
             const next = result.paging?.cursors?.after

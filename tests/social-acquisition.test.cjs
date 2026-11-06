@@ -223,3 +223,26 @@ test('dashboard reads only app-scoped marketing tables and preserves missing-day
     assert.equal(report.daily[6].signups, 2)
     assert.equal(report.signupCoverage.measuredDays, 1)
 })
+
+test('Instagram insights reads are bounded and retain media order despite out-of-order completion', async () => {
+    let active = 0, peak = 0
+    const api = load('lib/social/providers.ts', { './metrics': metrics }, { fetch: async url => {
+        const pathname = new URL(url).pathname
+        if (pathname.endsWith('/media')) return { ok: true, json: async () => ({ data: Array.from({ length: 9 }, (_, id) => ({ id: String(id), timestamp: '2026-01-01T00:00:00Z', media_type: 'IMAGE' })) }) }
+        const id = Number(pathname.split('/').at(-2))
+        active++; peak = Math.max(peak, active)
+        await new Promise(resolve => setTimeout(resolve, id % 2 ? 1 : 5))
+        active--
+        return { ok: true, json: async () => ({ data: [{ name: 'views', values: [{ value: id }] }] }) }
+    } })
+    const rows = await api.collect({ ...account, platform: 'instagram' })
+    assert.equal(peak, 4); assert.equal(rows.map(row => row.post_id).join(','), '0,1,2,3,4,5,6,7,8')
+})
+test('one failed Instagram insight rejects the collection rather than returning partial data', async () => {
+    const api = load('lib/social/providers.ts', { './metrics': metrics }, { fetch: async url => {
+        const pathname = new URL(url).pathname
+        if (pathname.endsWith('/media')) return { ok: true, json: async () => ({ data: [{ id: '1' }, { id: '2' }] }) }
+        return pathname.endsWith('/2/insights') ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, json: async () => ({ data: [] }) }
+    } })
+    await assert.rejects(api.collect({ ...account, platform: 'instagram' }), /Provider request failed/)
+})
