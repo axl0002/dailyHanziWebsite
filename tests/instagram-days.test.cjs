@@ -41,7 +41,7 @@ test('multi-account totals require every configured account and never substitute
 })
 function syncFixture({ existing = [], fail = false } = {}) {
     const calls = [], writes = []
-    const q = { eq: () => q, gte: () => q, lte: async () => ({ data: existing.map(day => ({ day })) }) }
+    const q = { eq: () => q, gte: () => q, lte: async () => ({ data: existing.map(day => typeof day === 'string' ? { day, status: 'complete' } : day) }) }
     const db = { from: () => ({ select: () => q }), rpc: async (name, body) => { writes.push({ name, ...body }); return {} } }
     const mod = moduleFor({ fetch: async (url, init) => { calls.push({ url: String(url), init }); return { ok: !fail, status: fail ? 403 : 200,
         json: async () => fail ? { error: { code: 10, message: 'private-token' } } : payload(10, [['AD', 7], ['POST', 3]]) } } })
@@ -71,4 +71,18 @@ test('provider failures preserve prior daily history and never expose provider t
         assert.ok(!error.message.includes('private-token')); return true
     })
     assert.equal(f.writes.length, 0)
+})
+
+test('carousel-slide views are organic and reconcile the previously missing November dates', () => {
+    const first = api.parseInstagramViews(payload(286642, [['REEL', 5072], ['CAROUSEL_ITEM', 1], ['STORY', 819], ['CAROUSEL_CONTAINER', 9644], ['AD', 270303], ['POST', 803]]))
+    assert.equal(first.status, 'complete'); assert.equal(first.organic_views, 16339)
+    const fourth = api.parseInstagramViews(payload(197648, [['CAROUSEL_ITEM', 3], ['STORY', 292], ['POST', 195], ['CAROUSEL_CONTAINER', 5902], ['REEL', 2453], ['AD', 188803]]))
+    assert.equal(fourth.status, 'complete'); assert.equal(fourth.organic_views, 8845)
+})
+test('unverified or unavailable older dates are retried instead of remaining permanent gaps', async () => {
+    for (const status of ['unverified', 'unavailable']) {
+        const f = syncFixture({ existing: [{ day: '2026-11-02', status }, '2026-11-03', '2026-11-04', '2026-11-05'] })
+        assert.equal(await f.syncInstagramDays(account, f.db, new Date('2026-11-06T12:00:00Z'), 5), 4)
+        assert.equal(f.writes[0].rows[0].day, '2026-11-02')
+    }
 })

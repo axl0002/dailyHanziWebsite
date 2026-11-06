@@ -7,7 +7,7 @@ export type InstagramDay = {
     day: string; account_id: string; total_views: number | null; ad_views: number | null; organic_views: number | null;
     status: 'complete' | 'unavailable' | 'unverified'; collected_at: string;
 }
-const surfaces = new Set(['AD', 'POST', 'FEED', 'CAROUSEL_CONTAINER', 'REEL', 'REELS', 'STORY'])
+const surfaces = new Set(['AD', 'POST', 'FEED', 'CAROUSEL_CONTAINER', 'CAROUSEL_ITEM', 'REEL', 'REELS', 'STORY'])
 // Only derive organic views from a complete, reconciled breakdown of the SAME
 // views metric. Never subtract Ads Manager impressions or assume unknown data is zero.
 export function parseInstagramViews(payload: unknown) {
@@ -46,16 +46,17 @@ export async function syncInstagramDays(account: SocialAccount, db: SupabaseClie
     const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00Z`)
     const start = new Date(today - (historyDays - 1) * 86400000).toISOString().slice(0, 10)
     const end = new Date(today - 86400000).toISOString().slice(0, 10)
-    const { data, error } = await db.from('instagram_account_days').select('day').eq('app_id', appId()).eq('account_id', account.accountId).gte('day', start).lte('day', end)
+    const { data, error } = await db.from('instagram_account_days').select('day,status').eq('app_id', appId()).eq('account_id', account.accountId).gte('day', start).lte('day', end)
     if (error) throw new Error('Apply the Instagram daily-insights migration in the marketing project.')
-    const existing = new Set((data ?? []).map(row => row.day))
+    const existing = new Map((data ?? []).map(row => [row.day, row.status]))
     const plan: { day: string; since: number; until: number }[] = []
     for (let offset = historyDays - 1; offset >= 1; offset--) {
         const since = (today - offset * 86400000) / 1000
         const day = new Date(since * 1000).toISOString().slice(0, 10)
         // Exclude today's incomplete UTC day. Revisit the latest three completed
         // dates because Meta can revise metrics after a delay of up to 48 hours.
-        if (!existing.has(day) || offset <= 3) plan.push({ day, since, until: since + 86400 - 1 })
+        // Retry unverified/unavailable history too, including after parser fixes.
+        if (existing.get(day) !== 'complete' || offset <= 3) plan.push({ day, since, until: since + 86400 - 1 })
     }
     const rows = []
     for (let offset = 0; offset < plan.length; offset += 4) {
