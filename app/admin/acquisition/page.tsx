@@ -6,7 +6,7 @@ import type { Snapshot } from '@/lib/social/metrics'
 
 type Daily = { day: string; instagram: number | null; tiktok: number | null; signups: number | null; instagramReferrals: number | null; tiktokReferrals: number | null; unknownReferrals: number | null }
 type Post = Snapshot & { gain: number | null; measuredDays: number }
-type Report = { instagramAttempt?: { status: string; stage: string; message: string | null; updated_at: string } | null; signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
+type Report = { instagramCoverage?: { measuredDays: number; totalDays: number }; instagramAttempt?: { status: string; stage: string; message: string | null; updated_at: string } | null; signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
     accounts: { platform: string; accountId: string; label: string }[];
     runs: { id: string; platform: string; account_id: string; label: string; started_at: string; status: string; message: string | null; post_count: number | null }[] }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString()
@@ -94,7 +94,7 @@ export default function AcquisitionPage() {
                 <button onClick={runSync} disabled={syncing || loading} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-50">{syncing ? 'Syncing accounts…' : 'Sync now'}</button></div>
         </div>
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Views are provider totals; paid distribution has not been separated. Dates use UTC.
+            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Instagram daily views exclude the AD category from Meta’s account insights. Dates use UTC; today is incomplete and recent data can be revised for up to 48 hours.
         </div>
         {syncMessage && <p role="status" className="rounded-lg bg-indigo-50 p-4 text-sm">{syncMessage}</p>}
         {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4">{error}<button onClick={() => load()} className="ml-3 underline">Retry</button></div>}
@@ -122,15 +122,16 @@ export default function AcquisitionPage() {
         </section>
         {loading && <p role="status">Loading acquisition data…</p>}
         {report && <>
-            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Connect Instagram above, or configure TikTok using docs/social-acquisition.md, then run your first sync. Two consecutive UTC days of snapshots are needed to measure view gains.</p></div>}
+            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Connect Instagram above, or configure TikTok using docs/social-acquisition.md, then run your first sync. Historical Instagram account views are backfilled after connection. Post-level gains need consecutive daily snapshots.</p></div>}
             <p className="text-sm text-gray-500">Signup aggregates available for {report.signupCoverage.measuredDays} / {report.signupCoverage.totalDays} days. {report.signupCoverage.lastCollectedAt ? `Oldest refresh: ${new Date(report.signupCoverage.lastCollectedAt).toUTCString()}.` : 'Run a sync to import daily counts from the app.'} Missing days appear as gaps.</p>
             <div className="grid gap-4 md:grid-cols-3">{[['New signups', number(report?.signupCoverage.measuredDays ? signups : null)], ['Instagram / TikTok survey referrals', number(report?.signupCoverage.measuredDays ? referrals : null)], ['Measured view gains (filtered posts)', number(measuredViews)]].map(([label, value]) => <div key={label} className={card}><p className="text-sm text-gray-500">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>)}</div>
-            <section className={card}><h2 className="font-semibold">Content views and signup activity</h2><p className="mb-5 mt-1 text-sm text-gray-500">View gains compare consecutive daily snapshots across all accounts. Missing baselines and counter decreases are gaps; partial coverage can undercount totals. Today is incomplete.</p>
+            <section className={card}><h2 className="font-semibold">Content views and signup activity</h2><p className="mb-5 mt-1 text-sm text-gray-500">Instagram bars show historical daily account views from non-ad categories, including posts, reels and stories. Missing or unverified breakdowns appear as gaps; today is excluded. Post comparisons below use consecutive snapshots.</p>
+                <p className="mb-3 text-xs text-gray-500">Instagram organic coverage: {report.instagramCoverage?.measuredDays ?? 0} / {days} dates. Paid views are excluded using Meta’s AD breakdown within the same views metric.</p>
                 <div className="h-80"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={report.daily}>
                     <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" tickFormatter={v => v.slice(5)} />
                     <YAxis yAxisId="views" /><YAxis yAxisId="signups" orientation="right" allowDecimals={false} />
-                    <Tooltip /><Legend /><Bar yAxisId="views" dataKey="instagram" name="Instagram view gains" fill="#818cf8" />
-                    <Bar yAxisId="views" dataKey="tiktok" name="TikTok view gains" fill="#2dd4bf" />
+                    <Tooltip /><Legend /><Bar yAxisId="views" dataKey="instagram" name="Instagram organic views" fill="#818cf8" />
+                    {report.accounts.some(account => account.platform === 'tiktok') && <Bar yAxisId="views" dataKey="tiktok" name="TikTok snapshot gains (unclassified)" fill="#2dd4bf" />}
                     <Line yAxisId="signups" dataKey="signups" name="Signups (right axis)" stroke="#111827" dot={false} />
                     <Line yAxisId="signups" dataKey="instagramReferrals" name="Instagram survey referrals" stroke="#9333ea" dot={false} />
                     <Line yAxisId="signups" dataKey="tiktokReferrals" name="TikTok survey referrals" stroke="#0f766e" dot={false} />
@@ -149,7 +150,7 @@ export default function AcquisitionPage() {
             <section className={card}><h2 className="mb-3 font-semibold">Account sync status</h2>{report.accounts.map(a => {
                 const run = report.runs.find(r => r.platform === a.platform && r.account_id === a.accountId)
                 return <div key={`${a.platform}:${a.accountId}`} className="border-t py-3 text-sm"><span className="font-medium">{a.label}</span> <span className="capitalize text-gray-500">({a.platform})</span><p className="mt-1">{run ? `${run.status} · ${new Date(run.started_at).toUTCString()}${run.post_count !== null ? ` · ${run.post_count} posts` : ''}` : 'Not synced yet'}{run?.message ? ` · ${run.message}` : ''}</p></div>
-            })}<p className="mt-3 text-xs text-gray-500">Daily history starts when collection is enabled. Older lifetime totals do not reconstruct historical daily views. Store installs and tracked link attribution are not connected yet.</p></section>
+            })}<p className="mt-3 text-xs text-gray-500">Instagram account history is backfilled from date-based insights. Post-level daily gains start with consecutive snapshots. Store installs and tracked link attribution are not connected yet.</p></section>
         </>}
     </div>
 }

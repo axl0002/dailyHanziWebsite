@@ -1,3 +1,4 @@
+import { aggregateInstagramDays, type InstagramDay } from '@/lib/social/instagram-days'
 import { connectedAccounts } from '@/lib/social/instagram-auth'
 import { NextResponse } from 'next/server'
 import { accounts } from '@/lib/social/providers'
@@ -27,11 +28,23 @@ export async function GET(request: Request) {
         const { data: connectionAttempts, error: attemptError } = await db.from('social_instagram_connection_attempts')
             .select('status,stage,message,created_at,updated_at').eq('app_id', appId()).order('created_at', { ascending: false }).limit(1)
         if (attemptError) throw new SocialError('Apply the Instagram connection-attempt migration in the marketing project.', 503)
+        const configured = await connectedAccounts(db, accounts())
+        const instagramDays: InstagramDay[] = []
+        for (let page = 0; ; page++) {
+            const { data, error } = await db.from('instagram_account_days')
+                .select('day,account_id,total_views,ad_views,organic_views,status,collected_at').eq('app_id', appId()).gte('day', start).lte('day', end)
+                .order('day').order('account_id').range(page * 1000, page * 1000 + 999)
+            if (error) throw new SocialError('Apply the Instagram daily-insights migration in the marketing project.', 503)
+            instagramDays.push(...(data || []))
+            if ((data?.length || 0) < 1000) break
+        }
+        const dates = Array.from({ length: days }, (_, i) => new Date(Date.parse(`${start}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10))
+        const organicDays = aggregateInstagramDays(instagramDays, configured.filter(account => account.platform === 'instagram').map(account => account.accountId), dates)
         const summary = summarize(snapshots, start, end)
         const daily = new Map(Array.from({ length: days }, (_, i) => {
             const day = new Date(Date.parse(`${start}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10)
             const social = summary.daily.find(d => d.day === day)
-            return [day, { day, instagram: social?.instagram ?? null, tiktok: social?.tiktok ?? null, signups: null as number | null, instagramReferrals: null as number | null, tiktokReferrals: null as number | null, unknownReferrals: null as number | null }]
+            return [day, { day, instagram: organicDays.find(row => row.day === day)?.organic ?? null, tiktok: social?.tiktok ?? null, signups: null as number | null, instagramReferrals: null as number | null, tiktokReferrals: null as number | null, unknownReferrals: null as number | null }]
         }))
         const sources: Record<string, number> = {}
         const { data: signupDays, error: signupError } = await db.from('marketing_signup_days')
@@ -51,9 +64,9 @@ export async function GET(request: Request) {
         const { data: runs, error } = await db.from('social_sync_runs').select('id,platform,account_id,label,started_at,completed_at,status,post_count,message')
             .eq('app_id', appId()).order('started_at', { ascending: false }).limit(100)
         if (error) throw new SocialError('Could not load sync history.', 500)
-        return NextResponse.json({ instagramAttempt: connectionAttempts?.[0] ?? null, daily: [...daily.values()], posts: summary.posts, sources, runs, signupCoverage: { measuredDays: signupDays?.length || 0, totalDays: days,
+        return NextResponse.json({ instagramCoverage: { measuredDays: organicDays.filter(day => day.organic !== null).length, totalDays: days }, instagramAttempt: connectionAttempts?.[0] ?? null, daily: [...daily.values()], posts: summary.posts, sources, runs, signupCoverage: { measuredDays: signupDays?.length || 0, totalDays: days,
                 lastCollectedAt: signupDays?.length ? signupDays.map(row => row.collected_at).sort()[0] : null },
-            accounts: (await connectedAccounts(db, accounts())).map(({ platform, accountId, label }) => ({ platform, accountId, label })) }, { headers: { 'Cache-Control': 'no-store' } })
+            accounts: configured.map(({ platform, accountId, label }) => ({ platform, accountId, label })) }, { headers: { 'Cache-Control': 'no-store' } })
     } catch (error) { return failure(error) }
 }
 export async function POST(request: Request) {
