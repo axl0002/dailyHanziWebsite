@@ -101,7 +101,7 @@ test('Meta diagnostics retain safe error codes and stage without provider secret
 })
 test('connection progress identifies the failure stage before any credential persistence', async () => {
     const f = authFixture([{ access_token: 'private-token' }, { data: [] }]), stages = []
-    await assert.rejects(f.authorizeInstagram('code', f.db, async stage => stages.push(stage)), /No Instagram account/)
+    await assert.rejects(f.authorizeInstagram('code', f.db, async stage => stages.push(stage)), /no delegated Instagram accounts/i)
     assert.equal(stages.join(','), 'code_exchange,account_discovery'); assert.equal(f.writes.length, 0)
 })
 test('OAuth attempt IDs hash state and do not store codes or tokens', async () => {
@@ -112,4 +112,64 @@ test('OAuth attempt IDs hash state and do not store codes or tokens', async () =
     await f.beginAttempt(db, 'private-state'); await f.updateAttempt(db, 'private-state', 'code_exchange')
     assert.equal(rows[0].id.length, 64); assert.equal(rows[0].status, 'started')
     assert.ok(!JSON.stringify(rows).includes('private-state')); assert.equal(writes[0].stage, 'code_exchange')
+})
+
+const systemInfo = { is_valid: true, app_id: '123', type: 'SYSTEM_USER', scopes: ['instagram_basic', 'instagram_manage_insights'], expires_at: 0 }
+test('business-owned system user validates direct account access and stores encrypted credentials', async () => {
+    const f = authFixture([{ data: systemInfo }, { id: '1', username: 'dailyhanzi.app' }, { data: [] }])
+    const account = await f.connectPortfolioInstagram('1', 'private-token', f.db)
+    assert.equal(account.username, 'dailyhanzi.app'); assert.equal(f.writes.length, 1)
+    assert.ok(!JSON.stringify(f.writes).includes('private-token'))
+    assert.equal(f.decryptToken(f.writes[0].rows.encrypted_access_token, '1'), 'private-token')
+    assert.ok(f.calls[0].url.includes('/debug_token'))
+    assert.equal(f.calls[0].init.headers.Authorization, 'Bearer 123|private-secret')
+    assert.ok(f.calls[1].url.includes('/1?fields=id%2Cusername'))
+    assert.ok(!f.calls.some(call => call.url.includes('assigned_instagram_accounts')))
+})
+test('system user tokens from a different app, wrong type, or missing scopes are rejected', async () => {
+    for (const patch of [{ app_id: '999' }, { type: 'USER' }, { is_valid: false }, { scopes: ['instagram_basic'] }, { expires_at: 1 }]) {
+        const f = authFixture([{ data: { ...systemInfo, ...patch } }])
+        await assert.rejects(f.connectPortfolioInstagram('1', 'private-token', f.db))
+        assert.equal(f.writes.length, 0); assert.equal(f.calls.length, 1)
+    }
+})
+test('direct account or insights failure never saves a token', async () => {
+    for (const responses of [[{ data: systemInfo }, { id: '2', username: 'other' }],
+        [{ data: systemInfo }, { id: '1', username: 'dailyhanzi.app' }, { error: { code: 10, message: 'private-token' } }]]) {
+        const f = authFixture(responses)
+        await assert.rejects(f.connectPortfolioInstagram('1', 'private-token', f.db), e => !e.message.includes('private-token'))
+        assert.equal(f.writes.length, 0)
+    }
+})
+test('owned-asset connection works without client OAuth configuration', async () => {
+    const f = authFixture([{ data: systemInfo }, { id: '1', username: 'dailyhanzi.app' }, { data: [] }],
+        { INSTAGRAM_LOGIN_CONFIG_ID: '', INSTAGRAM_REDIRECT_URI: '' })
+    await f.connectPortfolioInstagram('1', 'private-token', f.db)
+    assert.equal(f.writes.length, 1)
+})
+function portfolioRoute({ forbidden = false } = {}) {
+    let connects = 0
+    const module = load('app/api/admin/instagram/portfolio/route.ts', {
+        'next/server': { NextResponse: { json: body => body } },
+        '@/lib/social/instagram-attempts': { beginAttempt: async () => {}, updateAttempt: async () => {} },
+        '@/lib/social/instagram-auth': { connectPortfolioInstagram: async () => { connects++; return { accountId: '1', username: 'dailyhanzi.app' } } },
+        '@/lib/social/server': { SocialError, database: () => ({}), staff: async () => { if (forbidden) throw new SocialError('Forbidden', 403) },
+            failure: error => ({ status: error.status }) },
+    })
+    const request = (origin = 'https://dailyhanzi.app', body = JSON.stringify({ accountId: '1', accessToken: 'private-token' })) => ({
+        url: 'https://dailyhanzi.app/api/admin/instagram/portfolio', headers: new Headers({ origin }), text: async () => body })
+    return { ...module, request, count: () => connects }
+}
+test('owned-asset endpoint rejects non-admins, cross-origin requests and invalid bodies', async () => {
+    const f = portfolioRoute(), forbidden = portfolioRoute({ forbidden: true })
+    assert.equal((await forbidden.POST(forbidden.request())).status, 403); assert.equal(forbidden.count(), 0)
+    assert.equal((await f.POST(f.request('https://evil.test'))).status, 403)
+    assert.equal((await f.POST(f.request(undefined, '{}'))).status, 400)
+    assert.equal((await f.POST(f.request(undefined, 'not JSON'))).status, 400)
+    assert.equal(f.count(), 0)
+})
+test('owned-asset endpoint returns account confirmation without the token', async () => {
+    const f = portfolioRoute(), result = await f.POST(f.request())
+    assert.equal(f.count(), 1); assert.equal(result.account.username, 'dailyhanzi.app')
+    assert.ok(!JSON.stringify(result).includes('private-token'))
 })

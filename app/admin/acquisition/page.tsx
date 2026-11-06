@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { Snapshot } from '@/lib/social/metrics'
 
@@ -14,6 +14,7 @@ const card = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm'
 export default function AcquisitionPage() {
     const [days, setDays] = useState(30)
     const [connectionMessage, setConnectionMessage] = useState('')
+    const [connecting, setConnecting] = useState(false)
     useEffect(() => {
         const url = new URL(window.location.href)
         const error = url.searchParams.get('instagram_error')
@@ -42,6 +43,30 @@ export default function AcquisitionPage() {
         finally { if (!signal?.aborted) setLoading(false) }
     }, [days])
     useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort() }, [load])
+    async function connectOwnedAccount(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault()
+        if (connecting) return
+        const form = event.currentTarget
+        const values = new FormData(form)
+        setConnecting(true); setConnectionMessage('')
+        try {
+            const request = fetch('/api/admin/instagram/portfolio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accountId: values.get('accountId'), accessToken: values.get('accessToken') }) })
+            // Clear the password input immediately; credentials never enter React state,
+            // navigation URLs, localStorage, or provider error messages.
+            const tokenInput = form.elements.namedItem('accessToken') as HTMLInputElement | null
+            if (tokenInput) tokenInput.value = ''
+            const response = await request
+            const body = await response.json()
+            if (!response.ok) throw new Error(body.error || 'Could not connect the Instagram account.')
+            setConnectionMessage(body.message)
+            const url = new URL(window.location.href)
+            url.searchParams.delete('instagram_error'); url.searchParams.delete('instagram_connected')
+            window.history.replaceState(null, '', url.pathname + url.search)
+            await load()
+        } catch (error) { setConnectionMessage(error instanceof Error ? error.message : 'Connection failed.') }
+        finally { setConnecting(false) }
+    }
     async function runSync() {
         setSyncing(true); setSyncMessage('')
         try {
@@ -74,14 +99,23 @@ export default function AcquisitionPage() {
         {syncMessage && <p role="status" className="rounded-lg bg-indigo-50 p-4 text-sm">{syncMessage}</p>}
         {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4">{error}<button onClick={() => load()} className="ml-3 underline">Retry</button></div>}
         <section className={card}>
-            <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-semibold">Instagram connection</h2>
-                <p className="mt-1 text-sm text-gray-600">Connect your professional account through Meta to read posts and view insights. Select the Instagram accounts you want to track.</p></div>
-                <form action="/api/admin/instagram/connect" method="post"><button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">Connect / reconnect Instagram</button></form>
-            </div>
+            <h2 className="font-semibold">Connect business-owned Instagram</h2>
+            <p className="mt-1 text-sm text-gray-600">Use this when Joywise owns both the Meta app and the Instagram account. Create a system user in Meta Business Settings and assign it the Daily Hanzi app and Instagram account.</p>
+            <p className="mt-2 text-sm text-gray-600">Generate its token with instagram_basic and instagram_manage_insights. Find the numeric Instagram account ID under Business Settings → Accounts → Instagram accounts.</p>
+            <form onSubmit={connectOwnedAccount} className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="text-sm font-medium">Instagram account ID<input name="accountId" required inputMode="numeric" pattern="[0-9]+" autoComplete="off" placeholder="Numeric account ID, not username" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
+                <label className="text-sm font-medium">System user access token<input name="accessToken" type="password" required autoComplete="new-password" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
+                <div className="md:col-span-2"><button disabled={connecting} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50">{connecting ? 'Validating connection…' : 'Validate and connect Instagram'}</button>
+                    <p className="mt-2 text-xs text-gray-500">The server checks the token, account and insights access, then stores the token encrypted.</p></div>
+            </form>
+            <details className="mt-4 border-t pt-3"><summary className="cursor-pointer text-sm font-medium">Connect a separate client business through Meta login</summary>
+                <p className="mt-2 text-sm text-gray-600">Use business-integration login when the client portfolio is separate from the portfolio that owns this app.</p>
+                <form action="/api/admin/instagram/connect" method="post" className="mt-3"><button className="rounded-lg border px-4 py-2">Connect / reconnect through Meta</button></form>
+            </details>
             {report?.instagramAttempt && <p role="status" className={`mt-3 rounded-lg p-3 text-sm ${report.instagramAttempt.status === 'error' ? 'bg-red-50 text-red-800' : 'bg-indigo-50 text-indigo-900'}`}>
                 {report.instagramAttempt.message || `Connection ${report.instagramAttempt.status}: ${report.instagramAttempt.stage.replaceAll('_', ' ')}`}
                 <span className="ml-2 text-xs">{new Date(report.instagramAttempt.updated_at).toLocaleString()}</span>
-                {report.instagramAttempt.status === 'started' && ' If you already finished Meta approval, return here and start Connect Instagram again; the callback has not been recorded.'}
+                {report.instagramAttempt.status === 'started' && ' If you already finished Meta approval, return here and start the Meta connection again; the callback has not been recorded.'}
             </p>}
             {report && !report.accounts.some(account => account.platform === 'instagram') && <p className="mt-3 text-sm text-amber-800">Instagram is not connected yet.</p>}
             {connectionMessage && <p role="status" className="mt-3 text-sm">{connectionMessage}</p>}

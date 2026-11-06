@@ -49,7 +49,23 @@ The admin-only `/admin/acquisition` dashboard compares daily social view gains, 
 5. Open Acquisition as an admin and click **Sync now**. Verify each account reports success. This performs read-only social API calls and writes reporting snapshots to the marketing project. The same sync reads the app's last 90 UTC days of non-beta signups, computes daily counts, and transactionally upserts aggregates in marketing. A successful run includes zero-signup days; failed reads preserve prior aggregates. Signup sync also works with `SOCIAL_ACCOUNTS_JSON=[]`, before social accounts are authorized.
 6. Configure an external scheduler to call `GET /api/cron/social-sync` with `Authorization: Bearer <CRON_SECRET>`. Set a long random `CRON_SECRET` on the server. Run once daily at a consistent UTC time, e.g. `5 0 * * *`. No schedule is automatically installed. The route allows up to 300 seconds; hosting must support that duration. For large libraries, move collection to a background worker before enabling more accounts. A timed-out running account becomes eligible for retry after 15 minutes.
 
-## Instagram setup — Unified Login
+## Instagram setup — business-owned accounts
+
+Joywise owns both the Daily Hanzi Meta app and the dailyhanzi.app Instagram account. Use an explicit **portfolio system user**, rather than onboarding the same portfolio as its own client with a hidden business-integration system user. Meta's Facebook Login for Business documentation requires separate app-owner/client portfolios for the latter flow.
+
+1. Open https://business.facebook.com/settings/ and select Joywise. Under **Users → System users**, add a system user named `Daily Hanzi Analytics`. An employee system user with explicit asset assignments is sufficient; do not grant unrelated business assets.
+2. Assign the Daily Hanzi app and the dailyhanzi.app Instagram account to it. Enable the app-management permission needed to generate a token and the Instagram insight/read tasks available for that asset.
+3. Generate a system-user token for the **Daily Hanzi Meta app**, with `instagram_basic` and `instagram_manage_insights`. Token permissions depend on the app's granted access; do not request publishing/advertising permissions for this analytics integration.
+4. Find the numeric Instagram account ID under **Accounts → Instagram accounts → dailyhanzi.app**.
+5. On `/admin/acquisition`, enter the ID and token under **Connect business-owned Instagram**, then **Validate and connect Instagram**. Enter the token only into this password field, never into chat or a URL. The server introspects it with Meta, verifies its app ID/type/validity/scopes/expiry, checks the exact account and views-insights access, then encrypts it in the existing marketing connection table. Failed validation leaves existing saved connections intact. No additional migration or Vercel variables are required beyond the existing Meta app ID/secret and encryption key.
+6. Click **Sync now**. Connections and snapshots use the existing collectors. When a token expires or is revoked, generate and validate a replacement through the same form.
+
+Official references:
+- https://developers.facebook.com/documentation/facebook-login/facebook-login-for-business/
+- https://developers.facebook.com/docs/business-management-apis/system-users
+- https://developers.facebook.com/docs/graph-api/reference/debug_token/
+
+## Instagram setup — Unified Login for separate client businesses
 
 Use Meta's recommended **Instagram API with Unified Login**. The Acquisition page now provides **Connect / reconnect Instagram**, using Facebook Login for Business with a `config_id`, server-side authorization code exchange, a ten-minute Secure/HttpOnly/SameSite OAuth-state cookie, and discovery through `/me/assigned_instagram_accounts`. No Facebook Page is needed for this flow. `/me` is a business integration system user, not an Instagram account.
 
