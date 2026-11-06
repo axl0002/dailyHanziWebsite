@@ -102,7 +102,7 @@ export default function AcquisitionPage() {
             <h2 className="font-semibold">Connect business-owned Instagram</h2>
             <p className="mt-1 text-sm text-gray-600">Use this when Joywise owns both the Meta app and the Instagram account. Create a system user in Meta Business Settings and assign it the Daily Hanzi app and Instagram account.</p>
             <p className="mt-2 text-sm text-gray-600">Generate its token with instagram_basic and instagram_manage_insights. Find the numeric Instagram account ID under Business Settings → Accounts → Instagram accounts.</p>
-            <form onSubmit={connectOwnedAccount} className="mt-4 grid gap-3 md:grid-cols-2">
+            <form method="post" action="/api/admin/instagram/portfolio" onSubmit={connectOwnedAccount} className="mt-4 grid gap-3 md:grid-cols-2">
                 <label className="text-sm font-medium">Instagram account ID<input name="accountId" required inputMode="numeric" pattern="[0-9]+" autoComplete="off" placeholder="Numeric account ID, not username" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
                 <label className="text-sm font-medium">System user access token<input name="accessToken" type="password" required autoComplete="new-password" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
                 <div className="md:col-span-2"><button disabled={connecting} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50">{connecting ? 'Validating connection…' : 'Validate and connect Instagram'}</button>
