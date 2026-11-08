@@ -122,22 +122,6 @@ export default function AdminLayout({
                 </div>
 
                 <nav className="mt-6 px-2 space-y-2 flex-grow">
-                    <NavItem
-                        href="/admin/refunds"
-                        active={pathname === "/admin/refunds"}
-                        collapsed={collapsed}
-                        icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25L4.5 9.75 9 5.25M4.5 9.75h9.75a5.25 5.25 0 010 10.5H12" /></svg>}
-                        label="Refund"
-                    />
-                    {isAdmin && (
-                        <NavItem
-                            href="/admin/acquisition"
-                            active={pathname === "/admin/acquisition"}
-                            collapsed={collapsed}
-                            icon={<span aria-hidden="true" className="w-6 text-center">↗</span>}
-                            label="Organic"
-                        />
-                    )}
                     {isAdmin && (
                         <NavItem
                             href="/admin/dashboard"
@@ -149,6 +133,15 @@ export default function AdminLayout({
                                 </svg>
                             }
                             label="Dashboard"
+                        />
+                    )}
+                    {isAdmin && (
+                        <NavItem
+                            href="/admin/acquisition"
+                            active={pathname === "/admin/acquisition"}
+                            collapsed={collapsed}
+                            icon={<span aria-hidden="true" className="w-6 text-center">↗</span>}
+                            label="Organic"
                         />
                     )}
                     {isAdmin && (
@@ -274,6 +267,13 @@ export default function AdminLayout({
                             </svg>
                         }
                         label="Deletion Requests"
+                    />
+                    <NavItem
+                        href="/admin/refunds"
+                        active={pathname === "/admin/refunds"}
+                        collapsed={collapsed}
+                        icon={<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25L4.5 9.75 9 5.25M4.5 9.75h9.75a5.25 5.25 0 010 10.5H12" /></svg>}
+                        label="Refund"
                     />
                 </nav>
 

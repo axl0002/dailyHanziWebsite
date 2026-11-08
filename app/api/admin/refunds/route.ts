@@ -63,7 +63,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     try {
         if (request.headers.get('origin') !== new URL(request.url).origin) throw new RefundError('Invalid request origin.', 403)
-        const { user, db, auth } = await context()
+        const { user, db } = await context()
         if (process.env.GOOGLE_PLAY_REFUNDS_ENABLED !== 'true') throw new RefundError('Refund execution is disabled. An operator must enable it in the server configuration.', 503)
         let body
         try {
@@ -71,17 +71,12 @@ export async function POST(request: Request) {
             if (raw.length > 16384) throw new RefundError('Request too large.', 413)
             body = JSON.parse(raw)
         } catch (error) { if (error instanceof RefundError) throw error; throw new RefundError('Invalid request.') }
-        const { orderId, confirmedOrderId, password } = body ?? {}
+        const { orderId, confirmedOrderId } = body ?? {}
         if (typeof orderId !== 'string' || !orderPattern.test(orderId) || confirmedOrderId !== orderId) throw new RefundError('Confirm the exact order ID before issuing the refund.')
-        if (typeof password !== 'string' || !password || password.length > 4096 || !user.email) throw new RefundError('Enter your admin password to authorize this refund.', 400)
-        // Count attempts before password verification, including failed passwords.
+        // Rate-limit refund requests before contacting Google.
         const { data: allowed, error: limitError } = await db.rpc('claim_play_refund_auth_attempt', { p_actor_id: user.id })
         if (limitError) throw new RefundError('Could not verify the refund authorization limit. Check the refund security migration.', 503)
         if (allowed !== true) throw new RefundError('Too many refund authorization attempts. Try again in 10 minutes.', 429)
-        // Fresh password verification adds a check beyond the browser session. The email
-        // and actor come from getUser(), never from client-supplied identity fields.
-        const { data: verified, error: passwordError } = await auth.auth.signInWithPassword({ email: user.email, password })
-        if (passwordError || verified.user?.id !== user.id) throw new RefundError('Password verification failed.', 403)
         const token = await accessToken()
         const order = await getOrder(token, orderId)
         if (order.state !== 'PROCESSED') throw new RefundError(`This order cannot be refunded here (status: ${order.state}).`)

@@ -40,7 +40,6 @@ function fixture(options = {}) {
         update: data => { writes.push({ table, operation: 'update', data }); return query({ error: table === 'profiles' && options.profileError ? { message: 'fail' } : null }) },
     }) }
     const auth = { auth: {
-        signInWithPassword: async () => ({ data: { user: { id: options.wrongActor ? 'other-user' : 'staff' } }, error: options.badPassword ? { message: 'invalid password' } : null }),
         getUser: async () => ({ data: { user: options.anonymous ? null : { id: 'staff', email: 'staff@example.test' } } }) },
         from: () => ({ select: () => query({ data: options.forbidden ? [] : [{ role: 'moderator' }] }) }) }
     const module = load('app/api/admin/refunds/route.ts', {
@@ -57,7 +56,7 @@ function fixture(options = {}) {
                 return {}
             } },
     })
-    const request = (body = { orderId: id, confirmedOrderId: id, password: 'private-password' }, origin = 'https://admin.example.com') => ({
+    const request = (body = { orderId: id, confirmedOrderId: id }, origin = 'https://admin.example.com') => ({
         url: 'https://admin.example.com/api/admin/refunds', headers: new Headers({ origin }), json: async () => body, text: async () => JSON.stringify(body),
     })
     return { ...module, writes, calls, request }
@@ -159,15 +158,6 @@ test('refund execution is disabled unless explicitly enabled on the server', asy
     const f = fixture({ disabled: true })
     assert.equal((await f.POST(f.request())).status, 503); assert.equal(f.calls.length, 0); assert.equal(f.writes.length, 0)
 })
-test('fresh password and same-user identity are enforced before Google requests', async () => {
-    for (const options of [{ badPassword: true }, { wrongActor: true }]) {
-        const f = fixture(options)
-        assert.equal((await f.POST(f.request())).status, 403); assert.equal(f.calls.length, 0)
-        assert.ok(!f.writes.some(w => w.table === 'play_refunds')); assert.ok(!JSON.stringify(f.writes).includes('private-password'))
-    }
-    const f = fixture()
-    assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: id }))).status, 400); assert.equal(f.calls.length, 0)
-})
 test('authorization and refund budgets reject requests before any Google mutation', async () => {
     for (const options of [{ authLimited: true }, { refundLimited: true }]) {
         const f = fixture(options)
@@ -178,18 +168,16 @@ test('authorization and refund budgets reject requests before any Google mutatio
 
 test('oversized requests and client-supplied roles cannot bypass server checks', async () => {
     const f = fixture()
-    assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: id, password: 'private-password', extra: 'x'.repeat(17000) }))).status, 413)
+    assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: id, extra: 'x'.repeat(17000) }))).status, 413)
     assert.equal(f.calls.length, 0)
     const blocked = fixture({ forbidden: true })
-    assert.equal((await blocked.POST(blocked.request({ orderId: id, confirmedOrderId: id, password: 'private-password', role: 'admin', actor_id: 'staff' }))).status, 403)
+    assert.equal((await blocked.POST(blocked.request({ orderId: id, confirmedOrderId: id, role: 'admin', actor_id: 'staff' }))).status, 403)
     assert.equal(blocked.calls.length, 0)
 })
 
-test('refund authorization requires no authenticator API or code', async () => {
-    // The auth mock intentionally has no MFA methods. Password verification
-    // must still allow the refund without requesting an authenticator code.
+test('signed-in staff can confirm a refund without a password or authenticator code', async () => {
+    // The auth mock has getUser only: no password or MFA APIs.
     const f = fixture()
-    const result = await f.POST(f.request({ orderId: id, confirmedOrderId: id, password: 'private-password' }))
+    const result = await f.POST(f.request({ orderId: id, confirmedOrderId: id }))
     assert.equal(result.status, 200)
-    assert.ok(!JSON.stringify(f.writes).includes('private-password'))
 })
