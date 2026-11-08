@@ -15,8 +15,7 @@ export class RefundError extends Error {
 }
 const base = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/'
 export function packageName() {
-    const value = process.env.GOOGLE_PLAY_PACKAGE_NAME
-    if (!value) throw new RefundError('Refund setup incomplete: configure GOOGLE_PLAY_PACKAGE_NAME on the server.', 503)
+    const value = process.env.GOOGLE_PLAY_PACKAGE_NAME?.trim() || 'com.alexliu.dailyhanzi'
     return value
 }
 export async function accessToken() {
@@ -64,7 +63,11 @@ export function orderSummary(order: PlayOrder) {
     let refunded: Money | null = null
     if (currency && amounts.every(m => m.currencyCode === currency)) {
         const nanos = amounts.reduce((n, m) => n + BigInt(m.units ?? '0') * BigInt(1000000000) + BigInt(m.nanos ?? 0), BigInt(0))
-        refunded = { currencyCode: currency, units: String(nanos / BigInt(1000000000)), nanos: Number(nanos % BigInt(1000000000)) }
+        const paid = BigInt(order.total?.units ?? '0') * BigInt(1000000000) + BigInt(order.total?.nanos ?? 0)
+        // REFUNDED means the full order is refunded. A full-refund event must
+        // not cause earlier partial refunds to be counted twice.
+        if (order.state === 'REFUNDED' && full) refunded = order.total ?? null
+        else if (nanos <= paid) refunded = { currencyCode: currency, units: String(nanos / BigInt(1000000000)), nanos: Number(nanos % BigInt(1000000000)) }
     }
     // Do not show zero when Google reports a refund but omits monetary details.
     if (partials.some(e => !e.refundDetails?.total) ||

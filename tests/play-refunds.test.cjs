@@ -129,3 +129,17 @@ test('incomplete refund history does not understate the refunded amount', () => 
     assert.equal(google.orderSummary({ orderId: id, state: 'PARTIALLY_REFUNDED', total,
         orderHistory: { partialRefundEvents: [{ state: 'PROCESSED_SUCCESSFULLY' }] } }).refunded, null)
 })
+
+test('full refunds do not double count earlier partial refund events', () => {
+    const result = google.orderSummary({ orderId: id, state: 'REFUNDED', total, orderHistory: {
+        partialRefundEvents: [{ state: 'PROCESSED_SUCCESSFULLY', refundDetails: { total: { currencyCode: 'USD', units: '1' } } }],
+        refundEvent: { refundDetails: { total } },
+    } })
+    assert.equal(result.refunded.units, total.units); assert.equal(result.refunded.nanos, total.nanos)
+})
+test('orders without a supported purchase line cannot initiate a refund', async () => {
+    for (const lineItems of [[], [{}]]) {
+        const f = fixture({ order: { lineItems } })
+        assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.length, 0)
+    }
+})

@@ -25,6 +25,7 @@ export default function AgeChart({ filter = 'all' }: { filter?: ProFilter; dateR
 
     if (loading) return <ChartLoading />;
     if (error) return <ChartError title="Age" error={error} onRetry={retry} />;
+    if (!distributions || !Array.isArray(distributions.age_range)) return <ChartEmpty title="Age analytics is not enabled yet" hint="Age reporting needs to be configured for this app." />;
     if (data.length === 0) return <ChartEmpty title="No age data available" hint="Age survey responses will appear here." />;
 
     return (

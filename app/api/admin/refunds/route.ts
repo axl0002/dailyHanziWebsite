@@ -75,7 +75,7 @@ export async function POST(request: Request) {
         const cutoff = new Date(); cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 3)
         if (!Number.isFinite(Date.parse(order.createTime)) || new Date(order.createTime) < cutoff) throw new RefundError('Orders must be less than three years old.')
         const isSubscription = order.lineItems?.some(item => !!item.subscriptionDetails)
-        if (!isSubscription && !order.lineItems?.every(item => !!item.oneTimePurchaseDetails)) throw new RefundError('Only in-app purchases and subscriptions are supported.')
+        if (!isSubscription && (!order.lineItems?.length || !order.lineItems.every(item => !!item.oneTimePurchaseDetails))) throw new RefundError('Only in-app purchases and subscriptions are supported.')
         if (isSubscription) {
             if (!order.purchaseToken) throw new RefundError('Google did not provide the purchase token; use Play Console.')
             const subscription = await play<{ lineItems?: { latestSuccessfulOrderId?: string }[] }>(token, `purchases/subscriptionsv2/tokens/${encodeURIComponent(order.purchaseToken)}`)

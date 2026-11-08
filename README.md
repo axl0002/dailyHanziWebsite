@@ -43,7 +43,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 Before use, apply `supabase/policies/play_refunds.sql` in this app's Supabase project and configure these server-only environment variables:
 
 - `SUPABASE_SERVICE_ROLE_KEY`: this app's Supabase service role key.
-- `GOOGLE_PLAY_PACKAGE_NAME`: the exact Android application ID from Play Console (Hanzi: `com.alexliu.dailyhanzi`; Hangul: `uk.co.joywise.dailyhangul`; verify Deutsch in Play Console).
+- `GOOGLE_PLAY_PACKAGE_NAME`: optional override; this site defaults to `com.alexliu.dailyhanzi`.
 - `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`: the complete JSON service account credential, stored as a secret, never with a `NEXT_PUBLIC_` prefix.
 
 Enable the Google Play Developer API in the service account's Cloud project. Invite its email to Play Console with access to this app and the permissions “View financial data, orders, and cancellation survey responses” and “Manage orders and subscriptions”. See https://developers.google.com/android-publisher/getting_started.
