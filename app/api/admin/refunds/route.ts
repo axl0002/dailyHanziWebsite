@@ -71,28 +71,17 @@ export async function POST(request: Request) {
             if (raw.length > 16384) throw new RefundError('Request too large.', 413)
             body = JSON.parse(raw)
         } catch (error) { if (error instanceof RefundError) throw error; throw new RefundError('Invalid request.') }
-        const { orderId, confirmedOrderId, password, otp } = body ?? {}
+        const { orderId, confirmedOrderId, password } = body ?? {}
         if (typeof orderId !== 'string' || !orderPattern.test(orderId) || confirmedOrderId !== orderId) throw new RefundError('Confirm the exact order ID before issuing the refund.')
         if (typeof password !== 'string' || !password || password.length > 4096 || !user.email) throw new RefundError('Enter your admin password to authorize this refund.', 400)
         // Count attempts before password verification, including failed passwords.
         const { data: allowed, error: limitError } = await db.rpc('claim_play_refund_auth_attempt', { p_actor_id: user.id })
         if (limitError) throw new RefundError('Could not verify the refund authorization limit. Check the refund security migration.', 503)
         if (allowed !== true) throw new RefundError('Too many refund authorization attempts. Try again in 10 minutes.', 429)
-        const { data: assurance, error: assuranceError } = await auth.auth.mfa.getAuthenticatorAssuranceLevel()
-        if (assuranceError || !assurance) throw new RefundError('Could not verify session security. Sign in again.', 401)
-        const mfaRequired = assurance.nextLevel === 'aal2'
-        if (mfaRequired && (typeof otp !== 'string' || !/^[0-9]{6}$/.test(otp))) throw new RefundError('Enter your current authenticator code to authorize this refund.', 403)
         // Fresh password verification adds a check beyond the browser session. The email
         // and actor come from getUser(), never from client-supplied identity fields.
         const { data: verified, error: passwordError } = await auth.auth.signInWithPassword({ email: user.email, password })
         if (passwordError || verified.user?.id !== user.id) throw new RefundError('Password verification failed.', 403)
-        if (mfaRequired) {
-            const { data: factors, error: factorError } = await auth.auth.mfa.listFactors()
-            const factor = factors?.totp.find(item => item.status === 'verified')
-            if (factorError || !factor) throw new RefundError('An enrolled authenticator factor is required for this account.', 403)
-            const { error: otpError } = await auth.auth.mfa.challengeAndVerify({ factorId: factor.id, code: otp })
-            if (otpError) throw new RefundError('Authenticator code verification failed.', 403)
-        }
         const token = await accessToken()
         const order = await getOrder(token, orderId)
         if (order.state !== 'PROCESSED') throw new RefundError(`This order cannot be refunded here (status: ${order.state}).`)

@@ -20,14 +20,13 @@ export default function RefundsPage() {
     const [selected, setSelected] = useState<Order | null>(null)
     const [confirmation, setConfirmation] = useState('')
     const [password, setPassword] = useState('')
-    const [otp, setOtp] = useState('')
     const [error, setError] = useState('')
     const [message, setMessage] = useState('')
     const [warnings, setWarnings] = useState<string[]>([])
     async function search(event?: FormEvent) {
         event?.preventDefault()
         if (inFlight.current) return
-        setLoading(true); setError(''); setMessage(''); setWarnings([]); setSelected(null); setConfirmation(''); setPassword(''); setOtp(''); setOrders([])
+        setLoading(true); setError(''); setMessage(''); setWarnings([]); setSelected(null); setConfirmation(''); setPassword(''); setOrders([])
         try {
             const response = await fetch(`/api/admin/refunds?query=${encodeURIComponent(query.trim())}`, { cache: 'no-store' })
             const data = await response.json()
@@ -42,8 +41,8 @@ export default function RefundsPage() {
         inFlight.current = true; setBusy(true); setError(''); setMessage(''); setWarnings([])
         const id = selected.orderId
         try {
-            const payload = JSON.stringify({ orderId: id, confirmedOrderId: confirmation, password, otp })
-            setPassword(''); setOtp('')
+            const payload = JSON.stringify({ orderId: id, confirmedOrderId: confirmation, password })
+            setPassword('')
             const response = await fetch('/api/admin/refunds', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: payload })
             const data = await response.json()
@@ -53,7 +52,7 @@ export default function RefundsPage() {
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Refund result unknown. Refresh and check Play Console.')
             setOrders(rows => rows.map(row => row.orderId === id ? { ...row, attemptStatus: 'refresh_required' } : row))
-        } finally { setSelected(null); setConfirmation(''); setPassword(''); setOtp(''); setBusy(false); inFlight.current = false }
+        } finally { setSelected(null); setConfirmation(''); setPassword(''); setBusy(false); inFlight.current = false }
     }
     return <div className="space-y-6 max-w-6xl text-gray-900">
         <div><h1 className="text-3xl font-bold">Refund</h1><p className="text-gray-600 mt-2">Find a Google Play order, issue a full refund, and remove paid access.</p></div>
@@ -74,7 +73,7 @@ export default function RefundsPage() {
                 {order.error ? <td colSpan={4} className="p-4 text-red-700">{order.error}</td> : <>
                     <td className="p-4">{order.state}{order.attemptStatus && <div className="text-xs text-amber-800">{order.attemptStatus.replaceAll('_', ' ')}</div>}</td>
                     <td className="p-4 whitespace-nowrap">{money(order.total)}</td><td className="p-4 whitespace-nowrap">{money(order.refunded)}{order.refundedAt && <div className="text-xs text-gray-500">{new Date(order.refundedAt).toLocaleString()}</div>}</td>
-                    <td className="p-4"><button disabled={busy || loading || refundsEnabled !== true || order.state !== 'PROCESSED' || !!order.attemptStatus} onClick={() => { setSelected(order); setConfirmation(''); setPassword(''); setOtp('') }}
+                    <td className="p-4"><button disabled={busy || loading || refundsEnabled !== true || order.state !== 'PROCESSED' || !!order.attemptStatus} onClick={() => { setSelected(order); setConfirmation(''); setPassword('') }}
                         className="bg-red-600 text-white px-3 py-2 rounded-lg disabled:opacity-40">Refund &amp; remove access</button></td>
                 </>}
             </tr>)}</tbody></table></div>}
@@ -85,11 +84,9 @@ export default function RefundsPage() {
             <input id="refund-confirm" autoComplete="off" value={confirmation} disabled={busy} onChange={e => setConfirmation(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono" />
             <label htmlFor="refund-password" className="block text-sm font-medium">Your admin password</label>
             <input id="refund-password" type="password" autoComplete="current-password" value={password} disabled={busy} onChange={e => setPassword(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
-            <label htmlFor="refund-otp" className="block text-sm font-medium">Authenticator code (if two-factor authentication is enabled)</label>
-            <input id="refund-otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} disabled={busy} onChange={e => setOtp(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
             <p className="text-sm text-gray-600">Each refund requires fresh password verification. Safety limits: 3 per person and 5 per app in 24 hours, with a 60-second cooldown.</p>
             <div className="flex gap-3"><button disabled={busy || confirmation !== selected.orderId || !password} onClick={refund} className="bg-red-600 text-white px-4 py-2 rounded-lg disabled:opacity-40">{busy ? 'Submitting…' : 'Confirm refund & remove access'}</button>
-                <button disabled={busy} onClick={() => { setSelected(null); setPassword(''); setOtp('') }} className="border border-gray-300 px-4 py-2 rounded-lg">Cancel</button></div>
+                <button disabled={busy} onClick={() => { setSelected(null); setPassword('') }} className="border border-gray-300 px-4 py-2 rounded-lg">Cancel</button></div>
         </section>}
         <p className="text-sm text-gray-500">Email searches show up to 10 recent Google Play orders from purchase records. For subscriptions, select the latest paid order. Refunded amounts include confirmed refunds only; pending refunds may take time to appear. Apple purchases must be handled through Apple.</p>
     </div>

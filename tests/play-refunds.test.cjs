@@ -40,9 +40,6 @@ function fixture(options = {}) {
         update: data => { writes.push({ table, operation: 'update', data }); return query({ error: table === 'profiles' && options.profileError ? { message: 'fail' } : null }) },
     }) }
     const auth = { auth: {
-        mfa: { listFactors: async () => ({ data: { totp: [{ id: 'factor-1', status: 'verified' }] } }),
-            challengeAndVerify: async () => ({ error: options.badOtp ? { message: 'invalid otp' } : null }),
-            getAuthenticatorAssuranceLevel: async () => ({ data: options.weakMfa ? { currentLevel: 'aal1', nextLevel: 'aal2' } : { currentLevel: 'aal1', nextLevel: 'aal1' } }) },
         signInWithPassword: async () => ({ data: { user: { id: options.wrongActor ? 'other-user' : 'staff' } }, error: options.badPassword ? { message: 'invalid password' } : null }),
         getUser: async () => ({ data: { user: options.anonymous ? null : { id: 'staff', email: 'staff@example.test' } } }) },
         from: () => ({ select: () => query({ data: options.forbidden ? [] : [{ role: 'moderator' }] }) }) }
@@ -162,8 +159,8 @@ test('refund execution is disabled unless explicitly enabled on the server', asy
     const f = fixture({ disabled: true })
     assert.equal((await f.POST(f.request())).status, 503); assert.equal(f.calls.length, 0); assert.equal(f.writes.length, 0)
 })
-test('fresh password and enrolled MFA assurance are enforced before Google requests', async () => {
-    for (const options of [{ badPassword: true }, { wrongActor: true }, { weakMfa: true }]) {
+test('fresh password and same-user identity are enforced before Google requests', async () => {
+    for (const options of [{ badPassword: true }, { wrongActor: true }]) {
         const f = fixture(options)
         assert.equal((await f.POST(f.request())).status, 403); assert.equal(f.calls.length, 0)
         assert.ok(!f.writes.some(w => w.table === 'play_refunds')); assert.ok(!JSON.stringify(f.writes).includes('private-password'))
@@ -188,11 +185,11 @@ test('oversized requests and client-supplied roles cannot bypass server checks',
     assert.equal(blocked.calls.length, 0)
 })
 
-test('accounts with MFA must pass a fresh authenticator code as well as their password', async () => {
-    const requestBody = { orderId: id, confirmedOrderId: id, password: 'private-password', otp: '123456' }
-    const denied = fixture({ weakMfa: true, badOtp: true })
-    assert.equal((await denied.POST(denied.request(requestBody))).status, 403); assert.equal(denied.calls.length, 0)
-    const allowed = fixture({ weakMfa: true })
-    assert.equal((await allowed.POST(allowed.request(requestBody))).status, 200)
-    assert.ok(!JSON.stringify(allowed.writes).includes('private-password'))
+test('refund authorization requires no authenticator API or code', async () => {
+    // The auth mock intentionally has no MFA methods. Password verification
+    // must still allow the refund without requesting an authenticator code.
+    const f = fixture()
+    const result = await f.POST(f.request({ orderId: id, confirmedOrderId: id, password: 'private-password' }))
+    assert.equal(result.status, 200)
+    assert.ok(!JSON.stringify(f.writes).includes('private-password'))
 })
