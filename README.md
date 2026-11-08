@@ -53,3 +53,10 @@ Email lookup uses `profiles.email` and `subscription_events.user_id`, `store = P
 A unique audit record prevents concurrent or repeated attempts. An uncertain result remains locked as `needs_review`; check Play Console before manually reconciling any audit record. Refunds are never retried automatically. A Google success revokes the store purchase and sets the linked profile's `is_pro` to false and `pro_expires_at` to now. Ensure Google Play real-time developer notifications reach RevenueCat and the existing subscription webhook keeps app entitlements synchronized. Unlinked profiles or failed profile writes produce explicit reconciliation warnings; a successful payment request cannot be rolled back. Do not remove independent access grants when reconciling accounts with multiple purchases.
 
 Deploy the app after configuring secrets and applying the SQL. Validate first using read-only searches; do not use a real refund as a smoke test.
+
+
+### Refund security controls
+
+Apply `supabase/policies/play_refunds_security.sql` after `play_refunds.sql`. Refund execution is off by default; set the server-only `GOOGLE_PLAY_REFUNDS_ENABLED=true` only after configuring Play credentials and permissions. Every mutation verifies the signed Supabase user and staff role, the exact origin and order, a fresh authenticator code when the account has MFA enrolled, and a fresh password for that same user. Passwords are never written to logs or audit rows.
+
+The database atomically limits reservations to 3 per actor / 5 globally per app in a rolling 24 hours, with a 60-second actor cooldown. Password-authorization attempts are limited to 5 per actor and 25 per app per 10 minutes. Uncertain/refused Google mutations remain locked and count toward the safety budget. The service role can only select audit records and update outcome columns: it cannot delete, insert directly, or backdate records to evade the limits. Only service-role-only security-definer RPCs can append reservations or auth attempts, and those independently recheck staff membership. No real refunds are part of deployment checks.

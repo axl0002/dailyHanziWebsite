@@ -14,7 +14,8 @@ create table if not exists public.play_refunds (
     unique (package_name, order_id)
 );
 alter table public.play_refunds enable row level security;
-revoke all on public.play_refunds from anon, authenticated;
-grant all on public.play_refunds to service_role;
+revoke all on public.play_refunds from public, anon, authenticated, service_role;
+grant select on public.play_refunds to service_role;
+grant update (status, refund_total, warnings, completed_at) on public.play_refunds to service_role;
 -- Only the authenticated staff server endpoint can read/write using service_role.
 -- Never delete a processing/needs_review record without checking Play Console.

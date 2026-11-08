@@ -12,7 +12,7 @@ function load(relative, mocks = {}) {
     const source = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
     const module = { exports: {} }
     vm.runInNewContext(source, { module, exports: module.exports, require: name => name in mocks ? mocks[name] : require(name),
-        process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://example.invalid', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'secret' } },
+        process: { env: { NEXT_PUBLIC_SUPABASE_URL: 'https://example.invalid', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'secret', GOOGLE_PLAY_REFUNDS_ENABLED: mocks.__disabled ? 'false' : 'true' } },
         Buffer, AbortSignal, URL, URLSearchParams, Date, console }, { filename })
     return module.exports
 }
@@ -26,14 +26,28 @@ function fixture(options = {}) {
         for (const method of ['select','eq','in','not','limit','order','ilike','single','maybeSingle']) q[method] = () => q
         return q
     }
-    const db = { from: table => ({
+    const db = { rpc: async (name, data) => {
+        if (name === 'claim_play_refund_auth_attempt') {
+            writes.push({ table: 'play_refund_auth_attempts', data })
+            return { data: !options.authLimited, error: null }
+        }
+        assert.equal(name, 'reserve_play_refund')
+        writes.push({ table: 'play_refunds', operation: 'reserve', data })
+        return { error: options.refundLimited ? { code: 'P0001' } : options.duplicate ? { code: '23505' } : null }
+    }, from: table => ({
         select: () => query(table === 'profiles' ? { data: [{ id: 'owner' }] } : table === 'play_refunds' ? { data: null } : { data: [{ user_id: 'owner', raw: { transaction_id: id } }] }),
         insert: data => { writes.push({ table, operation: 'insert', data }); return Promise.resolve({ error: options.duplicate ? { code: '23505' } : null }) },
         update: data => { writes.push({ table, operation: 'update', data }); return query({ error: table === 'profiles' && options.profileError ? { message: 'fail' } : null }) },
     }) }
-    const auth = { auth: { getUser: async () => ({ data: { user: options.anonymous ? null : { id: 'staff' } } }) },
+    const auth = { auth: {
+        mfa: { listFactors: async () => ({ data: { totp: [{ id: 'factor-1', status: 'verified' }] } }),
+            challengeAndVerify: async () => ({ error: options.badOtp ? { message: 'invalid otp' } : null }),
+            getAuthenticatorAssuranceLevel: async () => ({ data: options.weakMfa ? { currentLevel: 'aal1', nextLevel: 'aal2' } : { currentLevel: 'aal1', nextLevel: 'aal1' } }) },
+        signInWithPassword: async () => ({ data: { user: { id: options.wrongActor ? 'other-user' : 'staff' } }, error: options.badPassword ? { message: 'invalid password' } : null }),
+        getUser: async () => ({ data: { user: options.anonymous ? null : { id: 'staff', email: 'staff@example.test' } } }) },
         from: () => ({ select: () => query({ data: options.forbidden ? [] : [{ role: 'moderator' }] }) }) }
     const module = load('app/api/admin/refunds/route.ts', {
+        __disabled: options.disabled,
         'next/server': { NextResponse: { json: (body, init = {}) => ({ body, status: init.status ?? 200 }) } },
         '@supabase/ssr': { createServerClient: () => auth }, '@supabase/supabase-js': { createClient: () => db },
         'next/headers': { cookies: async () => ({ getAll: () => [] }) },
@@ -46,8 +60,8 @@ function fixture(options = {}) {
                 return {}
             } },
     })
-    const request = (body = { orderId: id, confirmedOrderId: id }, origin = 'https://admin.example.com') => ({
-        url: 'https://admin.example.com/api/admin/refunds', headers: new Headers({ origin }), json: async () => body,
+    const request = (body = { orderId: id, confirmedOrderId: id, password: 'private-password' }, origin = 'https://admin.example.com') => ({
+        url: 'https://admin.example.com/api/admin/refunds', headers: new Headers({ origin }), json: async () => body, text: async () => JSON.stringify(body),
     })
     return { ...module, writes, calls, request }
 }
@@ -69,24 +83,24 @@ test('never sums currencies together', () => {
 test('unauthenticated and unprivileged callers cannot refund', async () => {
     for (const options of [{ anonymous: true }, { forbidden: true }]) {
         const f = fixture(options), r = await f.POST(f.request())
-        assert.equal(r.status, options.anonymous ? 401 : 403); assert.equal(f.writes.length, 0); assert.equal(f.calls.length, 0)
+        assert.equal(r.status, options.anonymous ? 401 : 403); assert.equal(f.writes.filter(w => w.table === 'play_refunds').length, 0); assert.equal(f.calls.length, 0)
     }
 })
 test('rejects cross-origin requests and mismatched confirmation', async () => {
     const f = fixture()
     assert.equal((await f.POST(f.request(undefined, 'https://other.example'))).status, 403)
     assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: 'wrong' }))).status, 400)
-    assert.equal(f.writes.length, 0)
+    assert.equal(f.writes.filter(w => w.table === 'play_refunds').length, 0)
 })
 test('refunded or pending orders cannot be refunded again', async () => {
     for (const state of ['REFUNDED', 'PENDING_REFUND', 'PARTIALLY_REFUNDED', 'CANCELED']) {
         const f = fixture({ order: { state } })
-        assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.length, 0)
+        assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.filter(w => w.table === 'play_refunds').length, 0)
     }
 })
 test('old subscription orders cannot revoke a newer billing period', async () => {
     const f = fixture({ oldOrder: true })
-    assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.length, 0)
+    assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.filter(w => w.table === 'play_refunds').length, 0)
 })
 test('unique audit lock prevents a second refund request', async () => {
     const f = fixture({ duplicate: true })
@@ -140,6 +154,45 @@ test('full refunds do not double count earlier partial refund events', () => {
 test('orders without a supported purchase line cannot initiate a refund', async () => {
     for (const lineItems of [[], [{}]]) {
         const f = fixture({ order: { lineItems } })
-        assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.length, 0)
+        assert.equal((await f.POST(f.request())).status, 400); assert.equal(f.writes.filter(w => w.table === 'play_refunds').length, 0)
     }
+})
+
+test('refund execution is disabled unless explicitly enabled on the server', async () => {
+    const f = fixture({ disabled: true })
+    assert.equal((await f.POST(f.request())).status, 503); assert.equal(f.calls.length, 0); assert.equal(f.writes.length, 0)
+})
+test('fresh password and enrolled MFA assurance are enforced before Google requests', async () => {
+    for (const options of [{ badPassword: true }, { wrongActor: true }, { weakMfa: true }]) {
+        const f = fixture(options)
+        assert.equal((await f.POST(f.request())).status, 403); assert.equal(f.calls.length, 0)
+        assert.ok(!f.writes.some(w => w.table === 'play_refunds')); assert.ok(!JSON.stringify(f.writes).includes('private-password'))
+    }
+    const f = fixture()
+    assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: id }))).status, 400); assert.equal(f.calls.length, 0)
+})
+test('authorization and refund budgets reject requests before any Google mutation', async () => {
+    for (const options of [{ authLimited: true }, { refundLimited: true }]) {
+        const f = fixture(options)
+        assert.equal((await f.POST(f.request())).status, 429)
+        assert.equal(f.calls.filter(c => c.body !== undefined).length, 0)
+    }
+})
+
+test('oversized requests and client-supplied roles cannot bypass server checks', async () => {
+    const f = fixture()
+    assert.equal((await f.POST(f.request({ orderId: id, confirmedOrderId: id, password: 'private-password', extra: 'x'.repeat(17000) }))).status, 413)
+    assert.equal(f.calls.length, 0)
+    const blocked = fixture({ forbidden: true })
+    assert.equal((await blocked.POST(blocked.request({ orderId: id, confirmedOrderId: id, password: 'private-password', role: 'admin', actor_id: 'staff' }))).status, 403)
+    assert.equal(blocked.calls.length, 0)
+})
+
+test('accounts with MFA must pass a fresh authenticator code as well as their password', async () => {
+    const requestBody = { orderId: id, confirmedOrderId: id, password: 'private-password', otp: '123456' }
+    const denied = fixture({ weakMfa: true, badOtp: true })
+    assert.equal((await denied.POST(denied.request(requestBody))).status, 403); assert.equal(denied.calls.length, 0)
+    const allowed = fixture({ weakMfa: true })
+    assert.equal((await allowed.POST(allowed.request(requestBody))).status, 200)
+    assert.ok(!JSON.stringify(allowed.writes).includes('private-password'))
 })

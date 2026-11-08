@@ -20,7 +20,7 @@ async function context() {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!key) throw new RefundError('Refund setup incomplete: configure SUPABASE_SERVICE_ROLE_KEY on the server.', 503)
     const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth: { persistSession: false, autoRefreshToken: false } })
-    return { user, db }
+    return { user, db, auth }
 }
 function failure(error: unknown) {
     return NextResponse.json({ error: error instanceof RefundError ? error.message : 'Request could not be completed. Refresh the order before trying again.' }, {
@@ -56,18 +56,43 @@ export async function GET(request: Request) {
                 return { ...orderSummary(order), attemptStatus: audit?.status ?? null }
             } catch (error) { return { orderId: id, error: error instanceof RefundError ? error.message : 'Could not load this order.' } }
         }))
-        return NextResponse.json({ orders: results }, { headers: { 'Cache-Control': 'no-store' } })
+        return NextResponse.json({ orders: results, refundsEnabled: process.env.GOOGLE_PLAY_REFUNDS_ENABLED === 'true' }, { headers: { 'Cache-Control': 'no-store' } })
     } catch (error) { return failure(error) }
 }
 
 export async function POST(request: Request) {
     try {
         if (request.headers.get('origin') !== new URL(request.url).origin) throw new RefundError('Invalid request origin.', 403)
-        const { user, db } = await context()
+        const { user, db, auth } = await context()
+        if (process.env.GOOGLE_PLAY_REFUNDS_ENABLED !== 'true') throw new RefundError('Refund execution is disabled. An operator must enable it in the server configuration.', 503)
         let body
-        try { body = await request.json() } catch { throw new RefundError('Invalid request.') }
-        const { orderId, confirmedOrderId } = body ?? {}
+        try {
+            const raw = await request.text()
+            if (raw.length > 16384) throw new RefundError('Request too large.', 413)
+            body = JSON.parse(raw)
+        } catch (error) { if (error instanceof RefundError) throw error; throw new RefundError('Invalid request.') }
+        const { orderId, confirmedOrderId, password, otp } = body ?? {}
         if (typeof orderId !== 'string' || !orderPattern.test(orderId) || confirmedOrderId !== orderId) throw new RefundError('Confirm the exact order ID before issuing the refund.')
+        if (typeof password !== 'string' || !password || password.length > 4096 || !user.email) throw new RefundError('Enter your admin password to authorize this refund.', 400)
+        // Count attempts before password verification, including failed passwords.
+        const { data: allowed, error: limitError } = await db.rpc('claim_play_refund_auth_attempt', { p_actor_id: user.id })
+        if (limitError) throw new RefundError('Could not verify the refund authorization limit. Check the refund security migration.', 503)
+        if (allowed !== true) throw new RefundError('Too many refund authorization attempts. Try again in 10 minutes.', 429)
+        const { data: assurance, error: assuranceError } = await auth.auth.mfa.getAuthenticatorAssuranceLevel()
+        if (assuranceError || !assurance) throw new RefundError('Could not verify session security. Sign in again.', 401)
+        const mfaRequired = assurance.nextLevel === 'aal2'
+        if (mfaRequired && (typeof otp !== 'string' || !/^[0-9]{6}$/.test(otp))) throw new RefundError('Enter your current authenticator code to authorize this refund.', 403)
+        // Fresh password verification adds a check beyond the browser session. The email
+        // and actor come from getUser(), never from client-supplied identity fields.
+        const { data: verified, error: passwordError } = await auth.auth.signInWithPassword({ email: user.email, password })
+        if (passwordError || verified.user?.id !== user.id) throw new RefundError('Password verification failed.', 403)
+        if (mfaRequired) {
+            const { data: factors, error: factorError } = await auth.auth.mfa.listFactors()
+            const factor = factors?.totp.find(item => item.status === 'verified')
+            if (factorError || !factor) throw new RefundError('An enrolled authenticator factor is required for this account.', 403)
+            const { error: otpError } = await auth.auth.mfa.challengeAndVerify({ factorId: factor.id, code: otp })
+            if (otpError) throw new RefundError('Authenticator code verification failed.', 403)
+        }
         const token = await accessToken()
         const order = await getOrder(token, orderId)
         if (order.state !== 'PROCESSED') throw new RefundError(`This order cannot be refunded here (status: ${order.state}).`)
@@ -90,11 +115,17 @@ export async function POST(request: Request) {
         const userIds = [...new Set((owners ?? []).map(e => e.user_id as string))]
         if (userIds.length > 1) throw new RefundError('Order is linked to multiple users. Resolve ownership before refunding.')
         const ownerId = userIds[0] ?? null
-        // Unique constraint serializes duplicate clicks and concurrent staff requests.
-        const { error: lockError } = await db.from('play_refunds').insert({ package_name: packageName(), order_id: orderId, actor_id: user.id,
-            user_id: ownerId, status: 'processing', order_total: order.total })
-        if (lockError) throw new RefundError(lockError.code === '23505' ? 'A refund has already been attempted for this order. Refresh and check Play Console before any further action.' :
-            'Could not record the refund. Apply supabase/policies/play_refunds.sql before issuing refunds.', 409)
+        // Atomic DB reservation enforces per-actor/global budgets and a unique
+        // order lock across concurrent requests before Google can be mutated.
+        const { error: lockError } = await db.rpc('reserve_play_refund', {
+            p_actor_id: user.id, p_package_name: packageName(), p_order_id: orderId,
+            p_user_id: ownerId, p_order_total: order.total,
+        })
+        if (lockError) {
+            if (lockError.code === 'P0001') throw new RefundError('Refund safety limit reached: at most 3 per staff member and 5 per app in 24 hours, with 60 seconds between requests.', 429)
+            throw new RefundError(lockError.code === '23505' ? 'A refund has already been attempted for this order. Refresh and check Play Console before any further action.' :
+                'Could not reserve the refund safely. Check the refund security migration.', 409)
+        }
         let accepted = false
         const warnings: string[] = []
         try {
