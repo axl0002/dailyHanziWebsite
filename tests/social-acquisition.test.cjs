@@ -14,6 +14,7 @@ function load(file, mocks = {}, globals = {}) {
     return module.exports
 }
 const metrics = load('lib/social/metrics.ts')
+const instagramDays = load('lib/social/instagram-days.ts', { './metrics': metrics, './server': {} })
 const row = (day, views, extra = {}) => ({ platform: 'instagram', account_id: 'a', post_id: 'p', day, views, ...extra })
 test('daily gains require consecutive observed days and nondecreasing known counters', () => {
     assert.equal(metrics.dailyGain(row('2026-11-05', 150), row('2026-11-04', 100)), 50)
@@ -126,6 +127,7 @@ test('manual sync rejects foreign origins before invoking authorization or colle
     let calls = 0
     class SocialError extends Error { constructor(message, status) { super(message); this.status = status } }
     const route = load('app/api/admin/acquisition/route.ts', {
+        '@/lib/social/instagram-days': instagramDays,
         '@/lib/social/instagram-auth': { connectedAccounts: async (_db, configured) => configured },
         'next/server': {}, '@/lib/social/providers': {}, '@/lib/social/metrics': {},
         '@/lib/social/server': { SocialError, staff: () => { calls++ }, failure: error => ({ status: error.status }) },
@@ -210,16 +212,63 @@ test('dashboard reads only app-scoped marketing tables and preserves missing-day
         return q
     } }
     const route = load('app/api/admin/acquisition/route.ts', {
+        '@/lib/social/instagram-days': instagramDays,
         '@/lib/social/instagram-auth': { connectedAccounts: async (_db, configured) => configured },
         'next/server': { NextResponse: { json: body => body } }, '@/lib/social/providers': { accounts: () => [] },
         '@/lib/social/metrics': metrics, '@/lib/social/sync': {},
         '@/lib/social/server': { database: () => db, appId: () => 'daily-hanzi', staff: async () => {}, failure: error => { throw error } },
     })
     const report = await route.GET({ url: 'https://admin.example/api/admin/acquisition?days=7' })
-    assert.equal(reads.join(','), 'social_snapshots,marketing_signup_days,social_sync_runs')
-    assert.equal(scopes.length, 3)
+    assert.equal(reads.join(','), 'social_snapshots,social_instagram_connection_attempts,instagram_account_days,marketing_signup_days,social_sync_runs')
+    assert.equal(scopes.length, 5)
     assert.ok(scopes.every(([, field, value]) => field === 'app_id' && value === 'daily-hanzi'))
     assert.equal(report.daily[0].signups, null)
     assert.equal(report.daily[6].signups, 2)
     assert.equal(report.signupCoverage.measuredDays, 1)
+})
+
+test('Instagram insights reads are bounded and retain media order despite out-of-order completion', async () => {
+    let active = 0, peak = 0
+    const api = load('lib/social/providers.ts', { './metrics': metrics }, { fetch: async url => {
+        const pathname = new URL(url).pathname
+        if (pathname.endsWith('/media')) return { ok: true, json: async () => ({ data: Array.from({ length: 9 }, (_, id) => ({ id: String(id), timestamp: '2026-01-01T00:00:00Z', media_type: 'IMAGE' })) }) }
+        const id = Number(pathname.split('/').at(-2))
+        active++; peak = Math.max(peak, active)
+        await new Promise(resolve => setTimeout(resolve, id % 2 ? 1 : 5))
+        active--
+        return { ok: true, json: async () => ({ data: [{ name: 'views', values: [{ value: id }] }] }) }
+    } })
+    const rows = await api.collect({ ...account, platform: 'instagram' })
+    assert.equal(peak, 4); assert.equal(rows.map(row => row.post_id).join(','), '0,1,2,3,4,5,6,7,8')
+})
+test('one failed Instagram insight rejects the collection rather than returning partial data', async () => {
+    const api = load('lib/social/providers.ts', { './metrics': metrics }, { fetch: async url => {
+        const pathname = new URL(url).pathname
+        if (pathname.endsWith('/media')) return { ok: true, json: async () => ({ data: [{ id: '1' }, { id: '2' }] }) }
+        return pathname.endsWith('/2/insights') ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, json: async () => ({ data: [] }) }
+    } })
+    await assert.rejects(api.collect({ ...account, platform: 'instagram' }), /Provider request failed/)
+})
+
+test('main graph uses verified historical organic views instead of totals or post snapshot gains', async () => {
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0)
+    const day = new Date(today.getTime() - 86400000).toISOString().slice(0, 10)
+    const previous = new Date(today.getTime() - 2 * 86400000).toISOString().slice(0, 10)
+    const db = { from: table => {
+        const rows = table === 'instagram_account_days' ? [{ day, account_id: 'a', total_views: 189680, ad_views: 180238,
+            organic_views: 9442, status: 'complete' }] : table === 'social_snapshots' ? [row(previous, 100), row(day, 1100)] : []
+        const q = { then: resolve => Promise.resolve({ data: rows }).then(resolve) }
+        for (const method of ['select', 'eq', 'gte', 'lte', 'order', 'range', 'limit']) q[method] = () => q
+        return q
+    } }
+    const route = load('app/api/admin/acquisition/route.ts', {
+        'next/server': { NextResponse: { json: body => body } }, '@/lib/social/providers': { accounts: () => [] },
+        '@/lib/social/instagram-auth': { connectedAccounts: async () => [{ platform: 'instagram', accountId: 'a', label: 'Test' }] },
+        '@/lib/social/instagram-days': instagramDays, '@/lib/social/metrics': metrics, '@/lib/social/sync': {},
+        '@/lib/social/server': { database: () => db, appId: () => 'daily-hanzi', staff: async () => {}, failure: error => { throw error } },
+    })
+    const report = await route.GET({ url: 'https://admin.example/api/admin/acquisition?days=7' })
+    assert.equal(report.daily.find(row => row.day === day).instagram, 9442)
+    assert.equal(report.instagramCoverage.measuredDays, 1)
+    assert.equal(report.posts[0].gain, 1000)
 })

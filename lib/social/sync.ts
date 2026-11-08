@@ -1,3 +1,4 @@
+import { syncInstagramDays } from './instagram-days'
 import { connectedAccounts } from './instagram-auth'
 import { tiktokToken } from './tiktok-token'
 import { accounts, collect } from './providers'
@@ -29,10 +30,20 @@ export async function sync() {
         if (error || !run) throw new SocialError('Apply the migration in supabase/marketing/migrations to the marketing project before syncing.', 503)
         try {
             const accessToken = await tiktokToken(account, db)
+            let dailyError: string | null = null
+            if (account.platform === 'instagram') {
+                try {
+                    const days = await syncInstagramDays({ ...account, accessToken }, db)
+                    results.push({ platform: 'instagram', label: `${account.label} daily organic views`, status: 'success', message: `${days} dates refreshed` })
+                } catch (error) {
+                    dailyError = error instanceof Error ? error.message : 'Could not refresh daily organic views.'
+                    results.push({ platform: 'instagram', label: `${account.label} daily organic views`, status: 'error', message: dailyError })
+                }
+            }
             const rows = (await collect({ ...account, accessToken })).map(row => ({ ...row, app_id }))
             const { error: saveError } = await db.rpc('save_social_snapshots', { rows })
             if (saveError) throw new Error('Could not save account snapshots. Check database migration.')
-            const { error: finishError } = await db.from('social_sync_runs').update({ status: 'success',
+            const { error: finishError } = await db.from('social_sync_runs').update({ status: dailyError ? 'error' : 'success', message: dailyError,
                 completed_at: new Date().toISOString(), post_count: rows.length }).eq('id', run.id)
             if (finishError) throw new Error('Snapshots saved, but could not record sync completion.')
             results.push({ platform: account.platform, label: account.label, status: 'success', posts: rows.length })

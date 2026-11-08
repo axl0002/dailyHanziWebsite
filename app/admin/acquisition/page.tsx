@@ -1,12 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { Snapshot } from '@/lib/social/metrics'
 
 type Daily = { day: string; instagram: number | null; tiktok: number | null; signups: number | null; instagramReferrals: number | null; tiktokReferrals: number | null; unknownReferrals: number | null }
 type Post = Snapshot & { gain: number | null; measuredDays: number }
-type Report = { signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
+type Report = { instagramCoverage?: { measuredDays: number; totalDays: number }; instagramAttempt?: { status: string; stage: string; message: string | null; updated_at: string } | null; signupCoverage: { measuredDays: number; totalDays: number; lastCollectedAt: string | null }; daily: Daily[]; posts: Post[]; sources: Record<string, number>;
     accounts: { platform: string; accountId: string; label: string }[];
     runs: { id: string; platform: string; account_id: string; label: string; started_at: string; status: string; message: string | null; post_count: number | null }[] }
 const number = (value: number | null) => value === null ? '—' : value.toLocaleString()
@@ -14,14 +14,14 @@ const card = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm'
 export default function AcquisitionPage() {
     const [days, setDays] = useState(30)
     const [connectionMessage, setConnectionMessage] = useState('')
+    const [connecting, setConnecting] = useState(false)
     useEffect(() => {
         const url = new URL(window.location.href)
         const error = url.searchParams.get('instagram_error')
         const count = url.searchParams.get('instagram_connected')
         if (error || count) {
             setConnectionMessage(error || `Connected ${count} Instagram account(s). Click Sync now to collect your first snapshot.`)
-            url.searchParams.delete('instagram_error'); url.searchParams.delete('instagram_connected')
-            window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+            // Preserve the result in the URL across reloads/remounts until the next connection attempt.
         }
     }, [])
     const [report, setReport] = useState<Report | null>(null)
@@ -43,6 +43,30 @@ export default function AcquisitionPage() {
         finally { if (!signal?.aborted) setLoading(false) }
     }, [days])
     useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort() }, [load])
+    async function connectOwnedAccount(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault()
+        if (connecting) return
+        const form = event.currentTarget
+        const values = new FormData(form)
+        setConnecting(true); setConnectionMessage('')
+        try {
+            const request = fetch('/api/admin/instagram/portfolio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accountId: values.get('accountId'), accessToken: values.get('accessToken') }) })
+            // Clear the password input immediately; credentials never enter React state,
+            // navigation URLs, localStorage, or provider error messages.
+            const tokenInput = form.elements.namedItem('accessToken') as HTMLInputElement | null
+            if (tokenInput) tokenInput.value = ''
+            const response = await request
+            const body = await response.json()
+            if (!response.ok) throw new Error(body.error || 'Could not connect the Instagram account.')
+            setConnectionMessage(body.message)
+            const url = new URL(window.location.href)
+            url.searchParams.delete('instagram_error'); url.searchParams.delete('instagram_connected')
+            window.history.replaceState(null, '', url.pathname + url.search)
+            await load()
+        } catch (error) { setConnectionMessage(error instanceof Error ? error.message : 'Connection failed.') }
+        finally { setConnecting(false) }
+    }
     async function runSync() {
         setSyncing(true); setSyncMessage('')
         try {
@@ -70,28 +94,44 @@ export default function AcquisitionPage() {
                 <button onClick={runSync} disabled={syncing || loading} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-50">{syncing ? 'Syncing accounts…' : 'Sync now'}</button></div>
         </div>
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Instagram views exclude ad views. TikTok views are provider-reported counts; paid distribution is not separately verified. Dates use UTC.
+            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Instagram daily views exclude the AD category from Meta’s account insights. Dates use UTC; today is incomplete and recent data can be revised for up to 48 hours.
         </div>
         {syncMessage && <p role="status" className="rounded-lg bg-indigo-50 p-4 text-sm">{syncMessage}</p>}
         {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4">{error}<button onClick={() => load()} className="ml-3 underline">Retry</button></div>}
         <section className={card}>
-            <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-semibold">Instagram connection</h2>
-                <p className="mt-1 text-sm text-gray-600">Connect your professional account through Meta to read posts and view insights. Select the Instagram accounts you want to track.</p></div>
-                <form action="/api/admin/instagram/connect" method="post"><button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">Connect / reconnect Instagram</button></form>
-            </div>
+            <h2 className="font-semibold">Connect business-owned Instagram</h2>
+            <p className="mt-1 text-sm text-gray-600">Use this when Joywise owns both the Meta app and the Instagram account. Create a system user in Meta Business Settings and assign it the Daily Hanzi app and Instagram account.</p>
+            <p className="mt-2 text-sm text-gray-600">Generate its token with instagram_basic and instagram_manage_insights. Find the numeric Instagram account ID under Business Settings → Accounts → Instagram accounts.</p>
+            <form method="post" action="/api/admin/instagram/portfolio" onSubmit={connectOwnedAccount} className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="text-sm font-medium">Instagram account ID<input name="accountId" required inputMode="numeric" pattern="[0-9]+" autoComplete="off" placeholder="Numeric account ID, not username" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
+                <label className="text-sm font-medium">System user access token<input name="accessToken" type="password" required autoComplete="new-password" disabled={connecting} className="mt-1 w-full rounded-lg border p-2 font-normal" /></label>
+                <div className="md:col-span-2"><button disabled={connecting} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50">{connecting ? 'Validating connection…' : 'Validate and connect Instagram'}</button>
+                    <p className="mt-2 text-xs text-gray-500">The server checks the token, account and insights access, then stores the token encrypted.</p></div>
+            </form>
+            <details className="mt-4 border-t pt-3"><summary className="cursor-pointer text-sm font-medium">Connect a separate client business through Meta login</summary>
+                <p className="mt-2 text-sm text-gray-600">Use business-integration login when the client portfolio is separate from the portfolio that owns this app.</p>
+                <form action="/api/admin/instagram/connect" method="post" className="mt-3"><button className="rounded-lg border px-4 py-2">Connect / reconnect through Meta</button></form>
+            </details>
+            {report?.instagramAttempt && <p role="status" className={`mt-3 rounded-lg p-3 text-sm ${report.instagramAttempt.status === 'error' ? 'bg-red-50 text-red-800' : 'bg-indigo-50 text-indigo-900'}`}>
+                {report.instagramAttempt.message || `Connection ${report.instagramAttempt.status}: ${report.instagramAttempt.stage.replaceAll('_', ' ')}`}
+                <span className="ml-2 text-xs">{new Date(report.instagramAttempt.updated_at).toLocaleString()}</span>
+                {report.instagramAttempt.status === 'started' && ' If you already finished Meta approval, return here and start the Meta connection again; the callback has not been recorded.'}
+            </p>}
+            {report && !report.accounts.some(account => account.platform === 'instagram') && <p className="mt-3 text-sm text-amber-800">Instagram is not connected yet.</p>}
             {connectionMessage && <p role="status" className="mt-3 text-sm">{connectionMessage}</p>}
         </section>
         {loading && <p role="status">Loading organic data…</p>}
         {report && <>
-            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Connect Instagram above, or configure TikTok using docs/social-acquisition.md, then run your first sync. Two consecutive UTC days of snapshots are needed to measure view gains.</p></div>}
+            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Connect Instagram above, or configure TikTok using docs/social-acquisition.md, then run your first sync. Historical Instagram account views are backfilled after connection. Post-level gains need consecutive daily snapshots.</p></div>}
             <p className="text-sm text-gray-500">Signup aggregates available for {report.signupCoverage.measuredDays} / {report.signupCoverage.totalDays} days. {report.signupCoverage.lastCollectedAt ? `Oldest refresh: ${new Date(report.signupCoverage.lastCollectedAt).toUTCString()}.` : 'Run a sync to import daily counts from the app.'} Missing days appear as gaps.</p>
             <div className="grid gap-4 md:grid-cols-3">{[['New signups', number(report?.signupCoverage.measuredDays ? signups : null)], ['Instagram / TikTok survey referrals', number(report?.signupCoverage.measuredDays ? referrals : null)], ['Measured view gains (filtered posts)', number(measuredViews)]].map(([label, value]) => <div key={label} className={card}><p className="text-sm text-gray-500">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>)}</div>
-            <section className={card}><h2 className="font-semibold">Content views and signup activity</h2><p className="mb-5 mt-1 text-sm text-gray-500">View gains compare consecutive daily snapshots across all accounts. Missing baselines and counter decreases are gaps; partial coverage can undercount totals. Today is incomplete.</p>
+            <section className={card}><h2 className="font-semibold">Content views and signup activity</h2><p className="mb-5 mt-1 text-sm text-gray-500">Instagram bars show historical daily account views from non-ad categories, including posts, reels and stories. Missing or unverified breakdowns appear as gaps; today is excluded. Post comparisons below use consecutive snapshots.</p>
+                <p className="mb-3 text-xs text-gray-500">Instagram organic coverage: {report.instagramCoverage?.measuredDays ?? 0} / {days} dates. Paid views are excluded using Meta’s AD breakdown within the same views metric.</p>
                 <div className="h-80"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={report.daily}>
                     <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" tickFormatter={v => v.slice(5)} />
                     <YAxis yAxisId="views" /><YAxis yAxisId="signups" orientation="right" allowDecimals={false} />
-                    <Tooltip /><Legend /><Bar yAxisId="views" dataKey="instagram" name="Instagram view gains" fill="#818cf8" />
-                    <Bar yAxisId="views" dataKey="tiktok" name="TikTok view gains" fill="#2dd4bf" />
+                    <Tooltip /><Legend /><Bar yAxisId="views" dataKey="instagram" name="Instagram organic views" fill="#818cf8" />
+                    {report.accounts.some(account => account.platform === 'tiktok') && <Bar yAxisId="views" dataKey="tiktok" name="TikTok snapshot gains (unclassified)" fill="#2dd4bf" />}
                     <Line yAxisId="signups" dataKey="signups" name="Signups (right axis)" stroke="#111827" dot={false} />
                     <Line yAxisId="signups" dataKey="instagramReferrals" name="Instagram survey referrals" stroke="#9333ea" dot={false} />
                     <Line yAxisId="signups" dataKey="tiktokReferrals" name="TikTok survey referrals" stroke="#0f766e" dot={false} />
@@ -110,7 +150,7 @@ export default function AcquisitionPage() {
             <section className={card}><h2 className="mb-3 font-semibold">Account sync status</h2>{report.accounts.map(a => {
                 const run = report.runs.find(r => r.platform === a.platform && r.account_id === a.accountId)
                 return <div key={`${a.platform}:${a.accountId}`} className="border-t py-3 text-sm"><span className="font-medium">{a.label}</span> <span className="capitalize text-gray-500">({a.platform})</span><p className="mt-1">{run ? `${run.status} · ${new Date(run.started_at).toUTCString()}${run.post_count !== null ? ` · ${run.post_count} posts` : ''}` : 'Not synced yet'}{run?.message ? ` · ${run.message}` : ''}</p></div>
-            })}<p className="mt-3 text-xs text-gray-500">Daily history starts when collection is enabled. Older lifetime totals do not reconstruct historical daily views. Store installs and tracked link attribution are not connected yet.</p></section>
+            })}<p className="mt-3 text-xs text-gray-500">Instagram account history is backfilled from date-based insights. Post-level daily gains start with consecutive snapshots. Store installs and tracked link attribution are not connected yet.</p></section>
         </>}
     </div>
 }
