@@ -27,7 +27,7 @@ export async function collect(account: SocialAccount, now = new Date()): Promise
         day: now.toISOString().slice(0, 10), observed_at: now.toISOString() }
     const rows: Snapshot[] = []
     if (account.platform === 'instagram') {
-        const version = process.env.INSTAGRAM_GRAPH_VERSION || 'v26.0'
+        const version = process.env.INSTAGRAM_GRAPH_VERSION || 'v27.0'
         if (!/^v\d+\.0$/.test(version)) throw new Error('Invalid Instagram Graph version.')
         let after: string | undefined
         for (let page = 0; ; page++) {
@@ -40,6 +40,7 @@ export async function collect(account: SocialAccount, now = new Date()): Promise
             if (!Array.isArray(result.data)) throw new Error('Unexpected Instagram media response.')
             for (const media of result.data) {
                 const insightsUrl = new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(media.id)}/insights`)
+                // Meta documents media views as organic only; total_views includes ads.
                 insightsUrl.searchParams.set('metric', 'views')
                 // Fail this account on insight errors, rather than silently storing zero.
                 const insights = await request(insightsUrl, account.accessToken)

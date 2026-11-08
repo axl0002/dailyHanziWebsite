@@ -16,6 +16,7 @@
 --     "theme":               [{key, is_pro, n}, ...],
 --     "use_traditional":     [...],
 --     "reading_hours":       [...],
+--     "age_range":           [...],   -- includes users without an answer
 --     "reason":              [...],
 --     "referral":            [...],
 --     "category":            [...],   -- unnested selected_categories
@@ -92,6 +93,11 @@ begin
             from base
             where coalesce(reading_hours, survey_responses->>'reading_hours') is not null
             group by 1, 2
+        ) t),
+        'age_range', (select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
+            select coalesce(nullif(btrim(survey_responses->>'age_range'), ''), 'Not provided') as key,
+                   is_pro, count(*)::int as n
+            from base group by 1, 2
         ) t),
         'reason', (select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) from (
             select survey_responses->>'reason' as key, is_pro, count(*)::int as n

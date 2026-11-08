@@ -31,6 +31,7 @@ export type Distributions = {
     theme: DistRow<string>[];
     use_traditional: DistRow<boolean>[];
     reading_hours: DistRow<string>[];
+    age_range: DistRow<string>[];
     reason: DistRow<string>[];
     referral: DistRow<string>[];
     category: DistRow<string>[];

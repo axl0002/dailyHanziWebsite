@@ -1,10 +1,11 @@
+import { connectedAccounts } from './instagram-auth'
 import { tiktokToken } from './tiktok-token'
 import { accounts, collect } from './providers'
 import { syncSignups } from './signups'
 import { appId, database, SocialError } from './server'
 export async function sync() {
-    const configured = accounts()
     const db = database()
+    const configured = await connectedAccounts(db, accounts())
     const app_id = appId()
     const results: { platform: string; label: string; status: string; posts?: number; message?: string }[] = []
     try {

@@ -126,6 +126,7 @@ test('manual sync rejects foreign origins before invoking authorization or colle
     let calls = 0
     class SocialError extends Error { constructor(message, status) { super(message); this.status = status } }
     const route = load('app/api/admin/acquisition/route.ts', {
+        '@/lib/social/instagram-auth': { connectedAccounts: async (_db, configured) => configured },
         'next/server': {}, '@/lib/social/providers': {}, '@/lib/social/metrics': {},
         '@/lib/social/server': { SocialError, staff: () => { calls++ }, failure: error => ({ status: error.status }) },
         '@/lib/social/sync': { sync: () => { calls++ } },
@@ -209,6 +210,7 @@ test('dashboard reads only app-scoped marketing tables and preserves missing-day
         return q
     } }
     const route = load('app/api/admin/acquisition/route.ts', {
+        '@/lib/social/instagram-auth': { connectedAccounts: async (_db, configured) => configured },
         'next/server': { NextResponse: { json: body => body } }, '@/lib/social/providers': { accounts: () => [] },
         '@/lib/social/metrics': metrics, '@/lib/social/sync': {},
         '@/lib/social/server': { database: () => db, appId: () => 'daily-hanzi', staff: async () => {}, failure: error => { throw error } },

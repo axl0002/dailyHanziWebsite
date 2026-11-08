@@ -13,6 +13,17 @@ const number = (value: number | null) => value === null ? '—' : value.toLocale
 const card = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm'
 export default function AcquisitionPage() {
     const [days, setDays] = useState(30)
+    const [connectionMessage, setConnectionMessage] = useState('')
+    useEffect(() => {
+        const url = new URL(window.location.href)
+        const error = url.searchParams.get('instagram_error')
+        const count = url.searchParams.get('instagram_connected')
+        if (error || count) {
+            setConnectionMessage(error || `Connected ${count} Instagram account(s). Click Sync now to collect your first snapshot.`)
+            url.searchParams.delete('instagram_error'); url.searchParams.delete('instagram_connected')
+            window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+        }
+    }, [])
     const [report, setReport] = useState<Report | null>(null)
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(true)
@@ -53,19 +64,26 @@ export default function AcquisitionPage() {
     const measuredViews = posts.some(p => p.gain !== null) ? posts.reduce((sum, p) => sum + (p.gain || 0), 0) : null
     return <div className="mx-auto max-w-7xl space-y-6 text-gray-900">
         <div className="flex flex-wrap items-end justify-between gap-4">
-            <div><h1 className="text-2xl font-bold">Organic acquisition</h1><p className="mt-1 text-gray-600">Compare content momentum with signups and self-reported discovery sources.</p></div>
+            <div><h1 className="text-2xl font-bold">Organic</h1><p className="mt-1 text-gray-600">Compare content momentum with signups and self-reported discovery sources.</p></div>
             <div className="flex gap-3"><select aria-label="Date range" value={days} onChange={e => setDays(Number(e.target.value))} className="rounded-lg border bg-white p-2" disabled={syncing}>
                 {[7, 30, 90].map(n => <option key={n} value={n}>Last {n} days</option>)}</select>
                 <button onClick={runSync} disabled={syncing || loading} className="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white disabled:opacity-50">{syncing ? 'Syncing accounts…' : 'Sync now'}</button></div>
         </div>
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Views are provider totals; paid distribution has not been separated. Dates use UTC.
+            Signups are not installs. Referral answers are self-reported, and a matching spike does not establish attribution. Instagram views exclude ad views. TikTok views are provider-reported counts; paid distribution is not separately verified. Dates use UTC.
         </div>
         {syncMessage && <p role="status" className="rounded-lg bg-indigo-50 p-4 text-sm">{syncMessage}</p>}
         {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4">{error}<button onClick={() => load()} className="ml-3 underline">Retry</button></div>}
-        {loading && <p role="status">Loading acquisition data…</p>}
+        <section className={card}>
+            <div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-semibold">Instagram connection</h2>
+                <p className="mt-1 text-sm text-gray-600">Connect your professional account through Meta to read posts and view insights. Select the Instagram accounts you want to track.</p></div>
+                <form action="/api/admin/instagram/connect" method="post"><button className="rounded-lg bg-indigo-600 px-4 py-2 text-white">Connect / reconnect Instagram</button></form>
+            </div>
+            {connectionMessage && <p role="status" className="mt-3 text-sm">{connectionMessage}</p>}
+        </section>
+        {loading && <p role="status">Loading organic data…</p>}
         {report && <>
-            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Configure native Instagram and TikTok credentials on the server using docs/social-acquisition.md, then run your first sync. Two consecutive UTC days of snapshots are needed to measure view gains.</p></div>}
+            {!report.accounts.length && <div className={card}><h2 className="font-semibold">Connect your accounts</h2><p className="mt-2 text-sm text-gray-600">Connect Instagram above, or configure TikTok using docs/social-acquisition.md, then run your first sync. Two consecutive UTC days of snapshots are needed to measure view gains.</p></div>}
             <p className="text-sm text-gray-500">Signup aggregates available for {report.signupCoverage.measuredDays} / {report.signupCoverage.totalDays} days. {report.signupCoverage.lastCollectedAt ? `Oldest refresh: ${new Date(report.signupCoverage.lastCollectedAt).toUTCString()}.` : 'Run a sync to import daily counts from the app.'} Missing days appear as gaps.</p>
             <div className="grid gap-4 md:grid-cols-3">{[['New signups', number(report?.signupCoverage.measuredDays ? signups : null)], ['Instagram / TikTok survey referrals', number(report?.signupCoverage.measuredDays ? referrals : null)], ['Measured view gains (filtered posts)', number(measuredViews)]].map(([label, value]) => <div key={label} className={card}><p className="text-sm text-gray-500">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>)}</div>
             <section className={card}><h2 className="font-semibold">Content views and signup activity</h2><p className="mb-5 mt-1 text-sm text-gray-500">View gains compare consecutive daily snapshots across all accounts. Missing baselines and counter decreases are gaps; partial coverage can undercount totals. Today is incomplete.</p>
