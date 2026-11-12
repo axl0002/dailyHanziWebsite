@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { supabase } from '@/lib/supabase';
+import PaywallCountryChart from './PaywallCountryChart';
+import { paywallCountries, type PaywallProfile, type CountrySeries } from '@/lib/paywallCountries';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
 import StackedReferenceLabel, { assignLabelRows, topMarginForLabelRows } from './StackedReferenceLabel';
@@ -28,6 +30,8 @@ function formatDateLabel(dateStr: string): string {
 }
 
 export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDeleteLabel }: Props) {
+    const [countrySeries, setCountrySeries] = useState<CountrySeries>({ countries: [], data: [] });
+    const [error, setError] = useState('');
     const [data, setData] = useState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
     const [debugInfo, setDebugInfo] = useState({ fetched: 0, totalInPeriod: 0 });
@@ -75,8 +79,10 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
     }, [earliestDate, getDateWindow]);
 
     useEffect(() => {
+        let active = true;
         const fetchData = async () => {
             setLoading(true);
+            setError('');
 
             const { startDate, endDate } = getDateWindow();
 
@@ -89,7 +95,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
             queryEnd.setDate(queryEnd.getDate() + 1);
 
             // Fetch profiles within the window with pagination
-            let allProfiles: { created_at: string; is_pro: boolean | null }[] = [];
+            let allProfiles: PaywallProfile[] = [];
             let page = 0;
             const pageSize = 1000;
             let hasMore = true;
@@ -100,7 +106,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
 
                 const query = supabase
                     .from('profiles')
-                    .select('created_at, is_pro')
+                    .select('created_at, is_pro, timezone')
                     .eq('is_beta', false)
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
@@ -109,9 +115,12 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                     .range(from, to);
 
                 const { data: batch, error } = await query;
+                if (!active) return;
 
                 if (error) {
                     console.error('Error fetching profiles:', error);
+                    setError('Could not load paywall conversion data. Please refresh to retry.');
+                    setCountrySeries({ countries: [], data: [] });
                     setLoading(false);
                     return;
                 }
@@ -128,8 +137,10 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                 page++;
 
                 if (allProfiles.length > 500000) {
-                    console.warn('Reached safety limit of 50k profiles');
-                    hasMore = false;
+                    setError('Too many signups to load this period completely. Choose a shorter period.');
+                    setCountrySeries({ countries: [], data: [] });
+                    setLoading(false);
+                    return;
                 }
             }
 
@@ -174,6 +185,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                 .sort((a, b) => a.date.localeCompare(b.date));
 
             setData(chartData);
+            setCountrySeries(paywallCountries(profiles, chartData.map(row => row.date)));
             setDebugInfo({
                 fetched: profiles?.length || 0,
                 totalInPeriod: inPeriodCount,
@@ -182,6 +194,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
         };
 
         fetchData();
+        return () => { active = false; };
     }, [days, pageOffset, getDateWindow]);
 
     // Date range label for display
@@ -238,6 +251,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
     );
 
     return (
+        <>
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 col-span-1 md:col-span-2">
             <div className="flex flex-wrap justify-between items-center mb-6 gap-3">
                 <div className="flex items-center gap-3">
@@ -402,5 +416,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                 />
             )}
         </div>
+        <PaywallCountryChart series={countrySeries} error={error} />
+        </>
     );
 }
