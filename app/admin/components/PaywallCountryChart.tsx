@@ -27,9 +27,13 @@ export default function PaywallCountryChart({ series, error, metric = 'conversio
                     <Tooltip content={({ active, payload, label }) => {
                         if (!active || !payload?.length) return null;
                         const day = payload[0].payload as CountryDay;
+                        const rankedCountries = series.countries
+                            .map((country, index) => ({ country, color: colors[index], value: signups ? day.counts[country].total : day.rates[country] }))
+                            .filter(({ country }) => !hidden.has(country))
+                            .sort((a, b) => (b.value ?? -1) - (a.value ?? -1) || a.country.localeCompare(b.country));
                         return <div className="bg-white p-3 border border-gray-200 shadow-lg rounded-lg text-sm">
                             <p className="font-semibold mb-2">{label}</p>
-                            {series.countries.map((country, i) => hidden.has(country) ? null : <p key={country} style={{ color: colors[i] }}>{country}: {signups ? `${day.counts[country].total} signups` : day.rates[country] === null ? 'No signups' : `${day.rates[country]}% (${day.counts[country].pro}/${day.counts[country].total})`}</p>)}
+                            {rankedCountries.map(({ country, color }) => <p key={country} style={{ color }}>{country}: {signups ? `${day.counts[country].total} signups` : day.rates[country] === null ? 'No signups' : `${day.rates[country]}% (${day.counts[country].pro}/${day.counts[country].total})`}</p>)}
                         </div>;
                     }} />
                     <Legend content={() => <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 pt-3">
