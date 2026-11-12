@@ -417,6 +417,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
             )}
         </div>
         <PaywallCountryChart series={countrySeries} error={error} />
+        <PaywallCountryChart series={countrySeries} error={error} metric="signups" />
         </>
     );
 }
