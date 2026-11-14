@@ -11,6 +11,12 @@ export async function middleware(request: NextRequest) {
         },
     })
 
+    // Public app-link endpoints have no session or personalized content.
+    const path = request.nextUrl.pathname
+    if (path.startsWith('/add/') ||
+        path === '/.well-known/apple-app-site-association' ||
+        path === '/.well-known/assetlinks.json') return response
+
     // Create an authenticated Supabase client for the middleware
     // This allows us to refresh the session if needed
     const supabase = createServerClient(

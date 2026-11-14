@@ -26,3 +26,8 @@
 - Responses use Cache-Control:no-store and Vary:User-Agent so one platform's store redirect cannot be cached for another. Request/query values never supply a redirect destination. This exact public path bypasses middleware's unnecessary Supabase session refresh; existing admin role gates remain unchanged.
 - User explicitly chose store-only routing instead of Universal Links/deferred invitation handling. Sharing retains the sender's username for manual adding after install; the route does not redeem invite codes, modify friendship or request login. No iOS association file, entitlement or Branch SDK is needed for this flow.
 - Verification: `node --test test/download-store.test.cjs` (eight isolated route cases), `npx tsc --noEmit`, scoped ESLint and production build. An existing unused middleware options warning remains. No live UI test or simulator.
+
+## Shared profile links
+
+- `/add/<opaque code>` supports iOS Universal Links and Android App Links for Daily Hanzi. The association files match this app and its Google Play signing certificate. The browser fallback only offers to open the app or go to either store. It does not resolve any account or send a request. Recipients who install from the page can return to the same link afterward.
+- `/download` remains the store router for previously shared messages. Run `node --test test/shared-profile.test.cjs test/download-store.test.cjs` for the isolated route checks.
