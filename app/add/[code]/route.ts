@@ -24,7 +24,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
 <meta name="description" content="Open Daily Hanzi to find your friend and send a request.">
 <meta property="og:title" content="Connect on Daily Hanzi">
 <meta property="og:description" content="Learn Chinese with friends.">
-<style>body{margin:0;min-height:100svh;display:grid;place-items:center;background:#f8f6f2;color:#272421;font:17px/1.5 system-ui,sans-serif}main{max-width:420px;text-align:center;padding:32px 24px}h1{font-size:32px;line-height:1.15}nav{display:grid;gap:10px;margin:24px 0}a{border:1px solid #9b4145;color:#9b4145;padding:12px 20px;border-radius:14px;text-decoration:none;font-weight:600}a.primary{background:#9b4145;color:white}a:focus-visible{outline:3px solid #272421;outline-offset:4px}</style>
+<style>
+:root{--hanzi-red:#c25456}
+body{margin:0;min-height:100svh;display:grid;place-items:center;background:#f8f6f2;color:#272421;font:17px/1.5 system-ui,sans-serif}
+main{max-width:420px;text-align:center;padding:32px 24px}
+h1{font-size:32px;line-height:1.15}
+nav{display:grid;gap:10px;margin:24px 0}
+a{border:1px solid var(--hanzi-red);color:var(--hanzi-red);padding:12px 20px;border-radius:14px;text-decoration:none;font-size:19px;font-weight:700}
+a.primary{background:var(--hanzi-red);color:white}
+a:focus-visible{outline:3px solid #272421;outline-offset:4px}
+</style>
 </head><body><main><h1>Connect on Daily Hanzi</h1>
 <p>Open Daily Hanzi to find your friend and send a request.</p>
 <nav aria-label="Open or install Daily Hanzi">
