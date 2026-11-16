@@ -269,6 +269,13 @@ export default function AdminLayout({
                         label="Deletion Requests"
                     />
                     <NavItem
+                        href="/admin/daily-prompts"
+                        active={pathname === "/admin/daily-prompts"}
+                        collapsed={collapsed}
+                        icon={<span aria-hidden="true" className="w-6 text-center text-xl">✎</span>}
+                        label="Daily Prompts"
+                    />
+                    <NavItem
                         href="/admin/refunds"
                         active={pathname === "/admin/refunds"}
                         collapsed={collapsed}
