@@ -60,3 +60,12 @@ Deploy the app after configuring secrets and applying the SQL. Validate first us
 Apply `supabase/policies/play_refunds_security.sql` after `play_refunds.sql`. Refund execution is off by default; set the server-only `GOOGLE_PLAY_REFUNDS_ENABLED=true` only after configuring Play credentials and permissions. Every mutation verifies the signed Supabase user and staff role, the exact origin and order, and database-enforced request and refund limits. Refunds use the existing staff session without a separate password or authenticator prompt.
 
 The database atomically limits reservations to 3 per actor / 5 globally per app in a rolling 24 hours, with a 60-second actor cooldown. Refund request attempts are limited to 5 per actor and 25 per app per 10 minutes. Uncertain/refused Google mutations remain locked and count toward the safety budget. The service role can only select audit records and update outcome columns: it cannot delete, insert directly, or backdate records to evade the limits. Only service-role-only security-definer RPCs can append reservations or auth attempts, and those independently recheck staff membership. No real refunds are part of deployment checks.
+
+
+## Daily prompts
+
+`/admin/daily-prompts` lets admins and moderators browse active/inactive `social_prompts`, filter by response type, and compare daily engagement. Apply `supabase/policies/daily_prompt_analytics.sql` to the app database. The staff-checked aggregate RPC returns only prompt metadata and counts, never user IDs, response text, or media.
+
+Response rate is assignments with a currently stored response divided by assignments, grouped by assignment `prompt_date` and `response_type`. It is not a view-to-response rate; deleted responses do not count, and today's cohort is incomplete. The 14/30/90-day charts and leaderboard share the type filter. Period rates use summed counts rather than averaged daily percentages. The leaderboard can rank by response count or rate, with assignment sample sizes alongside.
+
+Verify with `node --test tests/daily-prompts.test.cjs tests/prompt-analytics.test.cjs`; run `tests/prompt-analytics-security.sql` as the database owner for rollback-only access and aggregation checks.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import DailyPromptAnalytics from '../components/DailyPromptAnalytics';
 import type { DailyPrompt } from '@/lib/dailyPrompts';
 
 const pageSize = 20;
@@ -48,6 +49,8 @@ export default function DailyPromptsPage() {
             </div>
             {!loading && !error && <p className="text-sm text-gray-500 pb-2">{filtered.length} {filtered.length === 1 ? 'prompt' : 'prompts'}{type ? ` · ${typeLabel(type)}` : ' across all types'}</p>}
         </div>
+        <DailyPromptAnalytics type={type} refresh={refresh} />
+        <h2 className="text-xl font-bold">Prompt library</h2>
         {loading ? <p role="status" className="text-gray-500">Loading daily prompts…</p> : error ? <div role="alert" className="bg-red-50 text-red-700 p-4 rounded-lg">{error} <button className="underline ml-2" onClick={() => setRefresh(value => value + 1)}>Retry</button></div> : !filtered.length ? <p className="text-gray-500">No prompts found for this response type.</p> : <>
             <div className="space-y-4">{visible.map(prompt => <article key={prompt.id} className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
                 <div className="flex flex-wrap justify-between gap-3">
