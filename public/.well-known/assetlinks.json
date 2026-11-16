@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.alexliu.dailyhanzi",
+      "sha256_cert_fingerprints": [
+        "C0:AD:81:23:5C:39:0A:46:85:02:02:3F:63:07:A1:E3:92:DB:24:69:C6:FC:10:C0:4D:62:A5:BD:C9:EE:92:E8"
+      ]
+    }
+  }
+]
