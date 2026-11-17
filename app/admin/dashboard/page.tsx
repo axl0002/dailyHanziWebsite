@@ -1,6 +1,8 @@
 "use client";
 
+import { PlatformProvider, PlatformToggle, usePlatformState } from '../components/PlatformFilter';
 import { useState, useEffect } from 'react';
+import { platformScopes } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 
 import UserGrowthChart from "../components/UserGrowthChart";
@@ -19,37 +21,27 @@ import { useDateLabels } from "../components/useDateLabels";
 
 type DateRange = 'all' | '30d' | '7d';
 
-export default function AdminDashboard() {
+function AdminDashboardContent() {
     const [filter, setFilter] = useState<'all' | 'true' | 'false'>('all');
     const [dateRange, setDateRange] = useState<DateRange>('30d');
-    const [userCount, setUserCount] = useState<number | null>(null);
+    const [userCount, setUserCount] = usePlatformState<number | null>(null);
     const { labels, addLabel, deleteLabel } = useDateLabels();
 
     useEffect(() => {
         const fetchUserCount = async () => {
-            let query = supabase
-                .from('profiles')
-                .select('*', { count: 'exact', head: true })
-                .eq('is_beta', false);
-
-            if (filter === 'true') {
-                query = query.eq('is_pro', true);
-            } else if (filter === 'false') {
-                query = query.eq('is_pro', false);
-            }
-
-            const { count, error } = await query;
-
-            if (!error && count !== null) {
-                setUserCount(count);
+            const { data, error } = await supabase.rpc('admin_profile_counts_platforms');
+            if (!error && data) for (const scope of platformScopes) {
+                const pool = data[scope].pool;
+                setUserCount(filter === 'true' ? pool.pro : filter === 'false' ? pool.free : pool.total, scope);
             }
         };
 
         fetchUserCount();
-    }, [filter]);
+    }, [filter, setUserCount]);
 
     return (
         <div className="p-6">
+            <PlatformToggle />
             <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
@@ -164,4 +156,8 @@ export default function AdminDashboard() {
             </div>
         </div>
     );
+}
+
+export default function AdminDashboard() {
+    return <PlatformProvider><AdminDashboardContent /></PlatformProvider>;
 }

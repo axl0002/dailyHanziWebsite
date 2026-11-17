@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 
 type ChartData = {
@@ -24,9 +26,9 @@ function pad(n: number): string {
 }
 
 export default function HourlyGrowthChart({ filter }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [totalInPeriod, setTotalInPeriod] = useState(0);
+    const [totalInPeriod, setTotalInPeriod] = usePlatformState(0);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -39,7 +41,7 @@ export default function HourlyGrowthChart({ filter }: Props) {
             startHour.setHours(startHour.getHours() - (HOURS - 1));
 
             // Only fetch profiles created within the window.
-            let allProfiles: { created_at: string; is_pro: boolean | null }[] = [];
+            let allProfiles: { platform?: string | null; created_at: string; is_pro: boolean | null }[] = [];
             let page = 0;
             const pageSize = 1000;
             let hasMore = true;
@@ -50,7 +52,7 @@ export default function HourlyGrowthChart({ filter }: Props) {
 
                 let query = supabase
                     .from('profiles')
-                    .select('created_at, is_pro')
+                    .select('created_at, is_pro, platform')
                     .eq('is_beta', false)
                     .gte('created_at', startHour.toISOString())
                     .order('id', { ascending: true })
@@ -87,6 +89,8 @@ export default function HourlyGrowthChart({ filter }: Props) {
                 }
             }
 
+            for (const scope of platformScopes) {
+            const selectedProfiles = filterPlatformRows(allProfiles, scope);
             // Initialize 48 hourly buckets.
             const buckets: Record<string, { label: string; fullLabel: string; pro: number; free: number }> = {};
             const order: string[] = [];
@@ -106,7 +110,7 @@ export default function HourlyGrowthChart({ filter }: Props) {
             }
 
             let inPeriodCount = 0;
-            allProfiles.forEach((profile) => {
+            selectedProfiles.forEach((profile) => {
                 if (!profile.created_at) return;
                 const d = new Date(profile.created_at);
                 d.setMinutes(0, 0, 0);
@@ -130,13 +134,14 @@ export default function HourlyGrowthChart({ filter }: Props) {
                 total: buckets[key].pro + buckets[key].free,
             }));
 
-            setData(chartData);
-            setTotalInPeriod(inPeriodCount);
+            setData(chartData, scope);
+            setTotalInPeriod(inPeriodCount, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, [filter]);
+    }, [setData, setTotalInPeriod, filter]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col h-[460px] col-span-1 md:col-span-2">

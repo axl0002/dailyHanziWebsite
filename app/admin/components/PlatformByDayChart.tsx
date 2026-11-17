@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -51,10 +53,10 @@ function getPlatformColor(platform: string): string {
 }
 
 export default function PlatformByDayChart({ filter, dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [platforms, setPlatforms] = useState<string[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
+    const [platforms, setPlatforms] = usePlatformState<string[]>([]);
     const [loading, setLoading] = useState(true);
-    const [debugInfo, setDebugInfo] = useState({ fetched: 0, totalInPeriod: 0 });
+    const [debugInfo, setDebugInfo] = usePlatformState({ fetched: 0, totalInPeriod: 0 });
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
     const [earliestDate, setEarliestDate] = useState<string | null>(null);
@@ -158,7 +160,8 @@ export default function PlatformByDayChart({ filter, dateLabels, onAddLabel, onD
                 }
             }
 
-            const profiles = allProfiles;
+            for (const scope of platformScopes) {
+            const profiles = filterPlatformRows(allProfiles, scope);
 
             // Initialize date buckets
             const dailyStats: Record<string, Record<string, number>> = {};
@@ -213,17 +216,18 @@ export default function PlatformByDayChart({ filter, dateLabels, onAddLabel, onD
                 })
                 .sort((a, b) => a.date.localeCompare(b.date));
 
-            setData(chartData);
-            setPlatforms(sortedPlatforms);
+            setData(chartData, scope);
+            setPlatforms(sortedPlatforms, scope);
             setDebugInfo({
                 fetched: profiles?.length || 0,
                 totalInPeriod: inPeriodCount
-            });
+            }, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, [filter, days, pageOffset, getDateWindow]);
+    }, [setData, setPlatforms, setDebugInfo, filter, days, pageOffset, getDateWindow]);
 
     const { startDate, endDate } = getDateWindow();
     const startLabel = formatDateLabel(startDate.toISOString().split('T')[0]);

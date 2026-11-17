@@ -1,5 +1,6 @@
 "use client";
 
+import { PlatformProvider, PlatformToggle } from '../components/PlatformFilter';
 import { useState } from 'react';
 import AnalyticsGrid from '../components/AnalyticsGrid';
 import { ProfilesCacheProvider } from '../components/useProfilesCache';
@@ -10,13 +11,14 @@ type DateRange = 'all' | '30d' | '7d';
 // Non-revenue analytics visible to both admins and moderators. The revenue-
 // sensitive charts (cancellation, trial cancellation, pro %, etc.) stay on
 // /admin/dashboard which is admin-only in middleware.ts.
-export default function AnalyticsPage() {
+function AnalyticsPageContent() {
     const [filter, setFilter] = useState<ProFilter>('all');
     const [dateRange, setDateRange] = useState<DateRange>('30d');
 
     return (
         <ProfilesCacheProvider dateRange={dateRange}>
         <div className="p-6">
+            <PlatformToggle />
             <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
@@ -75,4 +77,8 @@ export default function AnalyticsPage() {
         </div>
         </ProfilesCacheProvider>
     );
+}
+
+export default function AnalyticsPage() {
+    return <PlatformProvider><AnalyticsPageContent /></PlatformProvider>;
 }

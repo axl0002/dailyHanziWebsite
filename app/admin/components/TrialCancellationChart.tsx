@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 
 type ChartData = {
@@ -15,6 +17,7 @@ type ChartData = {
 };
 
 type SupabaseRow = {
+    store?: string | null;
     product_id: string | null;
     event_timestamp: string;
     raw: {
@@ -96,9 +99,9 @@ function configFor(mode: Mode): BucketConfig {
 }
 
 export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8 }: Props) {
-    const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
-    const [starts3d, setStarts3d] = useState(0);
-    const [starts7d, setStarts7d] = useState(0);
+    const [cancelRows, setCancelRows] = usePlatformState<SupabaseRow[]>([]);
+    const [starts3d, setStarts3d] = usePlatformState(0);
+    const [starts7d, setStarts7d] = usePlatformState(0);
     const [cohortRange, setCohortRange] = useState<{ start: Date; end: Date } | null>(null);
     const [loading, setLoading] = useState(true);
     const [mode, setMode] = useState<Mode>('full');
@@ -125,7 +128,7 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
                     const to = from + pageSize - 1;
                     let q = supabase
                         .from('subscription_events')
-                        .select('product_id, event_timestamp, raw')
+                        .select('product_id, event_timestamp, raw, store')
                         .eq('event_type', eventType)
                         .eq('period_type', 'TRIAL')
                         .gte('event_timestamp', gteISO)
@@ -154,29 +157,31 @@ export default function TrialCancellationChart({ cohortDays = 30, bufferDays = 8
             ]);
             if (!startRows || !rawCancels) { setLoading(false); return; }
 
+            for (const scope of platformScopes) {
             // Filter cancellations to those whose underlying trial start falls in the cohort window.
             const cohortStartMs = cohortStart.getTime();
             const cohortEndMs = cohortEnd.getTime();
-            const cohortCancels = rawCancels.filter((r) => {
+            const cohortCancels = filterPlatformRows(rawCancels, scope).filter((r) => {
                 const pts = r.raw?.purchased_at_ms;
                 return pts !== undefined && pts >= cohortStartMs && pts < cohortEndMs;
             });
 
             let s3 = 0, s7 = 0;
-            for (const r of startRows) {
+            for (const r of filterPlatformRows(startRows, scope)) {
                 const len = trialLengthDays(r);
                 if (len === 3) s3++;
                 else if (len === 7) s7++;
             }
 
-            setCancelRows(cohortCancels);
-            setStarts3d(s3);
-            setStarts7d(s7);
+            setCancelRows(cohortCancels, scope);
+            setStarts3d(s3, scope);
+            setStarts7d(s7, scope);
+            }
             setCohortRange({ start: cohortStart, end: cohortEnd });
             setLoading(false);
         };
         fetchData();
-    }, [cohortDays, bufferDays]);
+    }, [setCancelRows, setStarts3d, setStarts7d, cohortDays, bufferDays]);
 
     const { data, cancels3d, cancels7d } = useMemo(() => {
         const cfg = configFor(mode);

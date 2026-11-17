@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -29,9 +31,9 @@ function formatDateLabel(dateStr: string): string {
 }
 
 export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [debugInfo, setDebugInfo] = useState({ fetched: 0, displayed: 0, totalInPeriod: 0 });
+    const [debugInfo, setDebugInfo] = usePlatformState({ fetched: 0, displayed: 0, totalInPeriod: 0 });
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
     const [earliestDate, setEarliestDate] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
             queryEnd.setDate(queryEnd.getDate() + 1);
 
             // Fetch profiles within the window with pagination
-            let allProfiles: { created_at: string; is_pro: boolean | null }[] = [];
+            let allProfiles: { platform?: string | null; created_at: string; is_pro: boolean | null }[] = [];
             let page = 0;
             const pageSize = 1000;
             let hasMore = true;
@@ -101,7 +103,7 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
 
                 let query = supabase
                     .from('profiles')
-                    .select('created_at, is_pro')
+                    .select('created_at, is_pro, platform')
                     .eq('is_beta', false)
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
@@ -141,7 +143,8 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
                 }
             }
 
-            const profiles = allProfiles;
+            for (const scope of platformScopes) {
+            const profiles = filterPlatformRows(allProfiles, scope);
 
             // Process data
             const dailyStats: Record<string, { pro: number; free: number }> = {};
@@ -182,17 +185,18 @@ export default function UserGrowthChart({ filter, dateLabels, onAddLabel, onDele
                 }))
                 .sort((a, b) => a.date.localeCompare(b.date));
 
-            setData(chartData);
+            setData(chartData, scope);
             setDebugInfo({
                 fetched: profiles?.length || 0,
                 displayed: chartData.length,
                 totalInPeriod: inPeriodCount
-            });
+            }, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, [filter, days, pageOffset, getDateWindow]);
+    }, [setData, setDebugInfo, filter, days, pageOffset, getDateWindow]);
 
     // Date range label for display
     const { startDate, endDate } = getDateWindow();

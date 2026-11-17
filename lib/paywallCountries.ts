@@ -1,6 +1,6 @@
 import { getCountryForTimezone } from 'countries-and-timezones';
 
-export type PaywallProfile = { created_at: string; is_pro: boolean | null; timezone: string | null };
+export type PaywallProfile = { platform?: string | null; created_at: string; is_pro: boolean | null; timezone: string | null };
 export type CountryDay = { date: string; rates: Record<string, number | null>; counts: Record<string, { pro: number; total: number }> };
 export type CountrySeries = { countries: string[]; data: CountryDay[] };
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import PaywallCountryChart from './PaywallCountryChart';
 import { paywallCountries, type PaywallProfile, type CountrySeries } from '@/lib/paywallCountries';
@@ -30,11 +32,11 @@ function formatDateLabel(dateStr: string): string {
 }
 
 export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [countrySeries, setCountrySeries] = useState<CountrySeries>({ countries: [], data: [] });
+    const [countrySeries, setCountrySeries] = usePlatformState<CountrySeries>({ countries: [], data: [] });
     const [error, setError] = useState('');
-    const [data, setData] = useState<ChartData[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [debugInfo, setDebugInfo] = useState({ fetched: 0, totalInPeriod: 0 });
+    const [debugInfo, setDebugInfo] = usePlatformState({ fetched: 0, totalInPeriod: 0 });
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
     const [earliestDate, setEarliestDate] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
 
                 const query = supabase
                     .from('profiles')
-                    .select('created_at, is_pro, timezone')
+                    .select('created_at, is_pro, timezone, platform')
                     .eq('is_beta', false)
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
@@ -144,7 +146,8 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                 }
             }
 
-            const profiles = allProfiles;
+            for (const scope of platformScopes) {
+            const profiles = filterPlatformRows(allProfiles, scope);
 
             // Process data - count pro and total signups per day
             const dailyStats: Record<string, { pro: number; total: number }> = {};
@@ -184,18 +187,19 @@ export default function ProUserPercentageChart({ dateLabels, onAddLabel, onDelet
                 }))
                 .sort((a, b) => a.date.localeCompare(b.date));
 
-            setData(chartData);
-            setCountrySeries(paywallCountries(profiles, chartData.map(row => row.date)));
+            setData(chartData, scope);
+            setCountrySeries(paywallCountries(profiles, chartData.map(row => row.date)), scope);
             setDebugInfo({
                 fetched: profiles?.length || 0,
                 totalInPeriod: inPeriodCount,
-            });
+            }, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
         return () => { active = false; };
-    }, [days, pageOffset, getDateWindow]);
+    }, [setData, setCountrySeries, setDebugInfo, days, pageOffset, getDateWindow]);
 
     // Date range label for display
     const { startDate, endDate } = getDateWindow();

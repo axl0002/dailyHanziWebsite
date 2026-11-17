@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePlatformFilter } from './PlatformFilter';
+import type { PlatformFilter } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 
 // Shared fetch primitive for the RPC-backed analytics charts (read histograms,
@@ -17,7 +19,8 @@ export function useRpcData<T>(
     args: Record<string, unknown>,
     parseRow: (raw: unknown) => T,
 ): { data: T[]; loading: boolean; error: string | null; retry: () => void } {
-    const [data, setData] = useState<T[]>([]);
+    const platform = usePlatformFilter();
+    const [data, setData] = useState<Record<PlatformFilter, T[]>>({ all: [], ios: [], android: [] });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
@@ -30,7 +33,7 @@ export function useRpcData<T>(
         setLoading(true);
         setError(null);
         (async () => {
-            const { data: raw, error: rpcErr } = await supabase.rpc(rpcName, args);
+            const { data: raw, error: rpcErr } = await supabase.rpc(`${rpcName}_platforms`, args);
             if (cancelled) return;
             if (rpcErr) {
                 console.error(`${rpcName}:`, rpcErr);
@@ -38,12 +41,14 @@ export function useRpcData<T>(
                 setLoading(false);
                 return;
             }
-            const arr = Array.isArray(raw)
-                ? raw
-                : (raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown }).data))
-                    ? (raw as { data: unknown[] }).data
-                    : [];
-            setData(arr.map(parseRow));
+            const slices = raw as Record<PlatformFilter, unknown>;
+            const parsed = {} as Record<PlatformFilter, T[]>;
+            for (const scope of ['all', 'ios', 'android'] as const) {
+                const value = slices?.[scope];
+                const arr = Array.isArray(value) ? value : (value && typeof value === 'object' && Array.isArray((value as { data?: unknown }).data)) ? (value as { data: unknown[] }).data : [];
+                parsed[scope] = arr.map(parseRow);
+            }
+            setData(parsed);
             setLoading(false);
         })();
         return () => { cancelled = true; };
@@ -52,7 +57,7 @@ export function useRpcData<T>(
 
     const retry = useCallback(() => setTick(t => t + 1), []);
 
-    return { data, loading, error, retry };
+    return { data: data[platform], loading, error, retry };
 }
 
 // Helper for the standard 'all' | '30d' | '7d' toolbar → ISO since_date arg.

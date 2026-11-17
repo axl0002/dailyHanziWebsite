@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -19,6 +21,7 @@ type DayStats = {
 };
 
 type SupabaseRow = {
+    store?: string | null;
     product_id: string | null;
     event_timestamp: string;
     raw: {
@@ -76,8 +79,8 @@ function dateKey(ms: number): string {
 }
 
 export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLabel, onDeleteLabel, endBufferDays = 3, resolvedBufferDays = 8 }: Props) {
-    const [startRows, setStartRows] = useState<SupabaseRow[]>([]);
-    const [cancelRows, setCancelRows] = useState<SupabaseRow[]>([]);
+    const [startRows, setStartRows] = usePlatformState<SupabaseRow[]>([]);
+    const [cancelRows, setCancelRows] = usePlatformState<SupabaseRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [days, setDays] = useState<14 | 30 | 60 | 90>(30);
     const [pageOffset, setPageOffset] = useState(0);
@@ -124,7 +127,7 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
                     const to = from + pageSize - 1;
                     let q = supabase
                         .from('subscription_events')
-                        .select('product_id, event_timestamp, raw')
+                        .select('product_id, event_timestamp, raw, store')
                         .eq('event_type', eventType)
                         .eq('period_type', 'TRIAL')
                         .gte('event_timestamp', gteISO)
@@ -153,12 +156,14 @@ export default function TrialCancellationRateOverTimeChart({ dateLabels, onAddLa
             ]);
             if (!starts || !cancels) { setLoading(false); return; }
 
-            setStartRows(starts);
-            setCancelRows(cancels);
+            for (const scope of platformScopes) {
+                setStartRows(filterPlatformRows(starts, scope), scope);
+                setCancelRows(filterPlatformRows(cancels, scope), scope);
+            }
             setLoading(false);
         };
         fetchData();
-    }, [days, pageOffset, getDateWindow]);
+    }, [setStartRows, setCancelRows, days, pageOffset, getDateWindow]);
 
     const data: DayStats[] = useMemo(() => {
         const { startDate, endDate } = getDateWindow();

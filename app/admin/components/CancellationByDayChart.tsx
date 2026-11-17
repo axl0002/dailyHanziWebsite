@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -16,6 +18,7 @@ type ChartData = {
 };
 
 type SupabaseRow = {
+    store?: string | null;
     product_id: string | null;
     event_timestamp: string;
     raw: {
@@ -51,9 +54,9 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
 }
 
 export default function CancellationByDayChart({ dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [debugInfo, setDebugInfo] = useState({ fetched: 0, displayed: 0, totalInPeriod: 0 });
+    const [debugInfo, setDebugInfo] = usePlatformState({ fetched: 0, displayed: 0, totalInPeriod: 0 });
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
     const [earliestDate, setEarliestDate] = useState<string | null>(null);
@@ -122,7 +125,7 @@ export default function CancellationByDayChart({ dateLabels, onAddLabel, onDelet
 
                 const { data: batch, error } = await supabase
                     .from('subscription_events')
-                    .select('product_id, event_timestamp, raw')
+                    .select('product_id, event_timestamp, raw, store')
                     .eq('event_type', 'CANCELLATION')
                     .eq('period_type', 'TRIAL')
                     .eq('cancel_reason', 'UNSUBSCRIBE')
@@ -155,6 +158,8 @@ export default function CancellationByDayChart({ dateLabels, onAddLabel, onDelet
                 }
             }
 
+            for (const scope of platformScopes) {
+            const selectedRows = filterPlatformRows(allRows, scope);
             const dailyStats: Record<string, { trial3d: number; trial7d: number }> = {};
 
             for (let i = 0; i < days; i++) {
@@ -166,7 +171,7 @@ export default function CancellationByDayChart({ dateLabels, onAddLabel, onDelet
 
             let inPeriodCount = 0;
 
-            allRows.forEach((row) => {
+            selectedRows.forEach((row) => {
                 if (!row.event_timestamp) return;
                 const dateString = new Date(row.event_timestamp).toISOString().split('T')[0];
                 if (!dailyStats[dateString]) return;
@@ -189,17 +194,18 @@ export default function CancellationByDayChart({ dateLabels, onAddLabel, onDelet
                 }))
                 .sort((a, b) => a.date.localeCompare(b.date));
 
-            setData(chartData);
+            setData(chartData, scope);
             setDebugInfo({
-                fetched: allRows.length,
+                fetched: selectedRows.length,
                 displayed: chartData.length,
                 totalInPeriod: inPeriodCount,
-            });
+            }, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, [days, pageOffset, getDateWindow]);
+    }, [setData, setDebugInfo, days, pageOffset, getDateWindow]);
 
     const { startDate, endDate } = getDateWindow();
     const startLabel = formatDateLabel(startDate.toISOString().split('T')[0]);

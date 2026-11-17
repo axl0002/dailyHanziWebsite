@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -16,6 +18,7 @@ type ChartData = {
 };
 
 type Profile = {
+    platform?: string | null;
     created_at: string;
     is_pro: boolean | null;
     timezone: string | null;
@@ -103,7 +106,7 @@ function getGroupColor(key: string): string {
 }
 
 export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [profiles, setProfiles] = useState<Profile[]>([]);
+    const [profiles, setProfiles] = usePlatformState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
@@ -173,7 +176,7 @@ export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onD
 
                 let query = supabase
                     .from('profiles')
-                    .select('created_at, is_pro, timezone')
+                    .select('created_at, is_pro, timezone, platform')
                     .eq('is_beta', false)
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
@@ -212,13 +215,13 @@ export default function TimezoneByDayChart({ filter, dateLabels, onAddLabel, onD
             }
 
             if (cancelled) return;
-            setProfiles(allProfiles);
+            for (const scope of platformScopes) setProfiles(filterPlatformRows(allProfiles, scope), scope);
             setLoading(false);
         };
 
         fetchProfiles();
         return () => { cancelled = true; };
-    }, [filter, getDateWindow]);
+    }, [setProfiles, filter, getDateWindow]);
 
     // Derive chart data from cached profiles. Recomputes instantly on toggle/day change.
     const { data, groups, debugInfo, unmappedZones, dailyBreakdown } = useMemo(() => {

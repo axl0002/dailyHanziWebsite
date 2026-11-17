@@ -1,6 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
+import { usePlatformFilter } from './PlatformFilter';
+import type { PlatformFilter } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import { sinceFromDateRange } from './useRpcData';
 
@@ -55,11 +57,12 @@ const ProfilesCacheContext = createContext<Ctx>({
 });
 
 export function ProfilesCacheProvider({ dateRange, children }: { dateRange: DateRange; children: ReactNode }) {
-    const [distributions, setDistributions] = useState<Distributions | null>(null);
+    const [distributions, setDistributions] = useState<Record<PlatformFilter, Distributions> | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
 
+    const platform = usePlatformFilter();
     const since = sinceFromDateRange(dateRange);
 
     useEffect(() => {
@@ -67,7 +70,7 @@ export function ProfilesCacheProvider({ dateRange, children }: { dateRange: Date
         setLoading(true);
         setError(null);
         (async () => {
-            const { data: raw, error: rpcErr } = await supabase.rpc('profile_distributions', { since_date: since });
+            const { data: raw, error: rpcErr } = await supabase.rpc('profile_distributions_platforms', { since_date: since });
             if (cancelled) return;
             if (rpcErr) {
                 console.error('profile_distributions:', rpcErr);
@@ -75,7 +78,7 @@ export function ProfilesCacheProvider({ dateRange, children }: { dateRange: Date
                 setLoading(false);
                 return;
             }
-            setDistributions(raw as Distributions);
+            setDistributions(raw as Record<PlatformFilter, Distributions>);
             setLoading(false);
         })();
         return () => { cancelled = true; };
@@ -84,7 +87,7 @@ export function ProfilesCacheProvider({ dateRange, children }: { dateRange: Date
     const retry = useCallback(() => setTick(t => t + 1), []);
 
     return (
-        <ProfilesCacheContext.Provider value={{ distributions, loading, error, retry }}>
+        <ProfilesCacheContext.Provider value={{ distributions: distributions?.[platform] ?? null, loading, error, retry }}>
             {children}
         </ProfilesCacheContext.Provider>
     );

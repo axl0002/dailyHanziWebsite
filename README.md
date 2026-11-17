@@ -69,3 +69,14 @@ The database atomically limits reservations to 3 per actor / 5 globally per app 
 Response rate is assignments with a currently stored response divided by assignments, grouped by assignment `prompt_date` and `response_type`. It is not a view-to-response rate; deleted responses do not count, and today's cohort is incomplete. The 14/30/90-day charts and leaderboard share the type filter. Period rates use summed counts rather than averaged daily percentages. The leaderboard can rank by response count or rate, with assignment sample sizes alongside.
 
 Verify with `node --test tests/daily-prompts.test.cjs tests/prompt-analytics.test.cjs`; run `tests/prompt-analytics-security.sql` as the database owner for rollback-only access and aggregation checks.
+
+
+## Dashboard platform filter
+
+Daily Hanzi's Dashboard and Analytics pages share a Both / iOS / Android selection, remembered for the browser session. Platform switches select already-loaded chart slices entirely in the browser. No chart remount or network request is caused by switching. Changing a chart's date window still loads that window for all platforms up front.
+
+Profile charts use `profiles.platform`; subscription event charts use `APP_STORE` / `PLAY_STORE` so both trial starts and cancellations share the same store cohort. Both retains the existing totals, including unknown platforms and other stores.
+
+Apply `supabase/policies/analytics_platform_slices.sql`. These additive staff-only RPCs return combined, iOS and Android aggregates without sending full profile/activity tables to the browser. Existing RPCs stay intact for older deployments. Heavy sentence-read and profile-distribution initial payloads have a scoped 55-second bound; sentence histograms scan the appropriate cohort once and JIT is disabled for aggregation functions. No global or role timeout is changed.
+
+Validation: `node --test tests/platform-filter.test.cjs` verifies platform/store attribution and no extra fetches across all ten direct-query charts and the aggregate hooks. `tests/analytics-platform-security.sql` checks staff gates and platform cohort totals in a rolled-back context.

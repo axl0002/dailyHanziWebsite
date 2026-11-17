@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 
 type ChartData = {
@@ -14,6 +16,7 @@ type ChartData = {
 };
 
 type SupabaseRow = {
+    store?: string | null;
     product_id: string | null;
     event_timestamp: string;
     raw: {
@@ -43,9 +46,9 @@ function trialLengthDays(row: SupabaseRow): 3 | 7 | null {
 }
 
 export default function HourlyCancellationChart() {
-    const [data, setData] = useState<ChartData[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
     const [loading, setLoading] = useState(true);
-    const [totalInPeriod, setTotalInPeriod] = useState(0);
+    const [totalInPeriod, setTotalInPeriod] = usePlatformState(0);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -69,7 +72,7 @@ export default function HourlyCancellationChart() {
 
                 const { data: batch, error } = await supabase
                     .from('subscription_events')
-                    .select('product_id, event_timestamp, raw')
+                    .select('product_id, event_timestamp, raw, store')
                     .eq('event_type', 'CANCELLATION')
                     .eq('period_type', 'TRIAL')
                     .eq('cancel_reason', 'UNSUBSCRIBE')
@@ -100,6 +103,8 @@ export default function HourlyCancellationChart() {
                 }
             }
 
+            for (const scope of platformScopes) {
+            const selectedRows = filterPlatformRows(allRows, scope);
             // Initialize 48 hourly buckets.
             const buckets: Record<string, { label: string; fullLabel: string; trial3d: number; trial7d: number }> = {};
             const order: string[] = [];
@@ -119,7 +124,7 @@ export default function HourlyCancellationChart() {
             }
 
             let inPeriodCount = 0;
-            allRows.forEach((row) => {
+            selectedRows.forEach((row) => {
                 if (!row.event_timestamp) return;
                 const d = new Date(row.event_timestamp);
                 d.setMinutes(0, 0, 0);
@@ -144,13 +149,14 @@ export default function HourlyCancellationChart() {
                 total: buckets[key].trial3d + buckets[key].trial7d,
             }));
 
-            setData(chartData);
-            setTotalInPeriod(inPeriodCount);
+            setData(chartData, scope);
+            setTotalInPeriod(inPeriodCount, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, []);
+    }, [setData, setTotalInPeriod]);
 
     if (loading) return (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex flex-col h-[460px] col-span-1 md:col-span-2">

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
+import { usePlatformState } from './PlatformFilter';
+import { platformScopes, filterPlatformRows } from '@/lib/platformFilter';
 import { supabase } from '@/lib/supabase';
 import DateLabelModal from './DateLabelModal';
 import ClickableXAxisTick from './ClickableXAxisTick';
@@ -53,10 +55,10 @@ function getSourceColor(source: string): string {
 }
 
 export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onDeleteLabel }: Props) {
-    const [data, setData] = useState<ChartData[]>([]);
-    const [sources, setSources] = useState<string[]>([]);
+    const [data, setData] = usePlatformState<ChartData[]>([]);
+    const [sources, setSources] = usePlatformState<string[]>([]);
     const [loading, setLoading] = useState(true);
-    const [debugInfo, setDebugInfo] = useState({ fetched: 0, totalInPeriod: 0 });
+    const [debugInfo, setDebugInfo] = usePlatformState({ fetched: 0, totalInPeriod: 0 });
     const [days, setDays] = useState<14 | 30 | 60 | 90>(14);
     const [pageOffset, setPageOffset] = useState(0);
     const [earliestDate, setEarliestDate] = useState<string | null>(null);
@@ -111,7 +113,7 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
             const queryEnd = new Date(endDate);
             queryEnd.setDate(queryEnd.getDate() + 1);
 
-            let allProfiles: { created_at: string; survey_responses: Record<string, unknown> | null; is_pro: boolean | null }[] = [];
+            let allProfiles: { platform?: string | null; created_at: string; survey_responses: Record<string, unknown> | null; is_pro: boolean | null }[] = [];
             let page = 0;
             const pageSize = 1000;
             let hasMore = true;
@@ -122,7 +124,7 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
 
                 let query = supabase
                     .from('profiles')
-                    .select('created_at, survey_responses, is_pro')
+                    .select('created_at, survey_responses, is_pro, platform')
                     .eq('is_beta', false)
                     .gte('created_at', queryStart.toISOString())
                     .lte('created_at', queryEnd.toISOString())
@@ -160,7 +162,8 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
                 }
             }
 
-            const profiles = allProfiles;
+            for (const scope of platformScopes) {
+            const profiles = filterPlatformRows(allProfiles, scope);
 
             // Initialize date buckets
             const dailyStats: Record<string, Record<string, number>> = {};
@@ -217,17 +220,18 @@ export default function ReferralByDayChart({ filter, dateLabels, onAddLabel, onD
                 })
                 .sort((a, b) => a.date.localeCompare(b.date));
 
-            setData(chartData);
-            setSources(sortedSources);
+            setData(chartData, scope);
+            setSources(sortedSources, scope);
             setDebugInfo({
                 fetched: profiles?.length || 0,
                 totalInPeriod: inPeriodCount
-            });
+            }, scope);
+            }
             setLoading(false);
         };
 
         fetchData();
-    }, [filter, days, pageOffset, getDateWindow]);
+    }, [setData, setSources, setDebugInfo, filter, days, pageOffset, getDateWindow]);
 
     const { startDate, endDate } = getDateWindow();
     const startLabel = formatDateLabel(startDate.toISOString().split('T')[0]);
